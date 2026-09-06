@@ -54,3 +54,7 @@ export function normalizeDepartmentRecords(records, defaults = []) {
     };
   });
 }
+
+export function removeListFromRecent(recentLists, id) {
+  return Array.isArray(recentLists) ? recentLists.filter(item => item.id !== id) : [];
+}

@@ -8,7 +8,8 @@ import {
   getListIdFromLocation,
   normalizeDepartmentRecords,
   normalizePayload,
-  payloadForSave
+  payloadForSave,
+  removeListFromRecent
 } from './list-model.js';
 
 const firebaseConfig = {
@@ -46,6 +47,14 @@ function readRecentLists() {
 function rememberList(id, name) {
   const current = readRecentLists().filter(item => item.id !== id);
   localStorage.setItem(recentStorageKey, JSON.stringify([{ id, name: String(name || DEFAULT_LIST_NAME).trim() || DEFAULT_LIST_NAME }, ...current].slice(0, 10)));
+}
+function forgetList(id) {
+  localStorage.setItem(recentStorageKey, JSON.stringify(removeListFromRecent(readRecentLists(), id)));
+}
+function homeUrl() {
+  const url = new URL(window.location.href);
+  url.search = '';
+  return url.href;
 }
 function urlFor(id) {
   const url = new URL(window.location.href);
@@ -110,6 +119,7 @@ function startList(id) {
   let cloudReady = false;
   let saveTimer;
   let lastSavedContent = '';
+  let deleting = false;
 
   listNameInput.value = rememberedName || DEFAULT_LIST_NAME;
   shareButton.hidden = false;
@@ -243,6 +253,10 @@ function startList(id) {
       if (!auth.currentUser) await signInAnonymously(auth);
       onValue(cloudList, result => {
         cloudReady = true;
+        if (result.val()?.deleted) {
+          if (!deleting) leaveDeletedList();
+          return;
+        }
         if (result.exists()) {
           const incoming = normalizePayload(result.val());
           if (incoming && contentOf(incoming) !== lastSavedContent) restore(incoming);
@@ -254,6 +268,23 @@ function startList(id) {
       }, () => setSync('הסנכרון אינו זמין כרגע — נשמר במכשיר', true));
     } catch (_) {
       setSync('יש להפעיל Anonymous ב‑Firebase כדי לסנכרן', true);
+    }
+  }
+  function leaveDeletedList() {
+    localStorage.removeItem(localStorageKey);
+    forgetList(id);
+    window.location.assign(homeUrl());
+  }
+  async function deleteCurrentList() {
+    if (!confirm('המחיקה תסיר לצמיתות את הרשימה ואת כל הפריטים מהקישור המשותף. להמשיך?')) return;
+    deleting = true;
+    setSync('מחיקת הרשימה…');
+    try {
+      await set(cloudList, { deleted: true, deletedAt: Date.now() });
+      leaveDeletedList();
+    } catch (_) {
+      deleting = false;
+      setSync('לא ניתן למחוק כרגע — אפשר לנסות שוב', true);
     }
   }
 
@@ -284,5 +315,6 @@ function startList(id) {
       save();
     }
   });
+  document.querySelector('#delete-list').addEventListener('click', deleteCurrentList);
   shareButton.addEventListener('click', shareCurrentList);
 }
