@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#274e3f">
+  <title>רשימת קניות לפי מחלקות</title>
+  <style>
+    :root { --ink:#183329; --muted:#65766c; --paper:#f4f2eb; --card:#fffefa; --line:#dbe3da; --green:#286a51; --mint:#e9f1eb; --shadow:0 12px 34px rgba(24,51,41,.09); }
+    * { box-sizing:border-box; }
+    body { margin:0; color:var(--ink); background:var(--paper); font-family:Arial,"Noto Sans Hebrew",sans-serif; line-height:1.4; }
+    .shell { width:min(1020px,calc(100% - 28px)); margin:0 auto 56px; }
+    header { display:flex; justify-content:space-between; align-items:end; gap:18px; padding:34px 0 25px; }
+    .eyebrow { color:var(--green); font-weight:800; font-size:.83rem; letter-spacing:.04em; }
+    h1 { margin:4px 0 7px; font-size:clamp(1.8rem,4vw,2.75rem); letter-spacing:-.04em; }
+    .subtitle { max-width:650px; margin:0; color:var(--muted); }
+    .tools { display:flex; gap:9px; flex-wrap:wrap; }
+    button { border:1px solid var(--line); border-radius:10px; cursor:pointer; font:inherit; font-weight:700; padding:9px 12px; color:var(--ink); background:var(--card); }
+    button:hover { background:#e8f1e9; }
+    .progress { background:var(--mint); border:1px solid #d2e0d4; border-radius:14px; padding:13px 16px; margin:0 0 18px; display:flex; justify-content:space-between; align-items:center; gap:14px; }
+    .progress strong { color:var(--green); }
+    .list { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; align-items:start; }
+    .department { background:var(--card); border:1px solid var(--line); border-radius:16px; overflow:hidden; box-shadow:var(--shadow); }
+    .department-head { background:#edf4ee; padding:12px 15px; display:flex; align-items:center; justify-content:space-between; gap:10px; }
+    .department h2 { margin:0; font-size:1.08rem; }
+    .department small { color:var(--muted); }
+    .row { display:grid; grid-template-columns:27px minmax(0,1fr) 128px; gap:8px; align-items:center; min-height:45px; padding:6px 11px; border-bottom:1px solid #edf0eb; }
+    .row input[type=checkbox] { width:18px; height:18px; cursor:pointer; accent-color:var(--green); }
+    .name, .note { min-width:0; width:100%; border:1px solid transparent; border-radius:7px; padding:5px 6px; background:transparent; color:var(--ink); }
+    .name:hover, .name:focus, .note:hover, .note:focus { outline:0; border-color:#bfd1c2; background:white; }
+    .note { color:var(--muted); font-size:.82rem; text-align:left; }
+    .row:has(input:checked) .name, .row:has(input:checked) .note { color:#8d9a91; text-decoration:line-through; }
+    .blank .name::placeholder, .blank .note::placeholder { color:#a0aaa4; }
+    .add { margin:9px 11px 11px; padding:6px 10px; font-size:.83rem; background:transparent; }
+    footer { margin-top:18px; text-align:center; color:var(--muted); font-size:.83rem; }
+    @media (max-width:750px) { header { align-items:start; flex-direction:column; padding-top:25px; } .tools { width:100%; } .tools button { flex:1; } .list { grid-template-columns:1fr; } .row { grid-template-columns:27px minmax(0,1fr) 105px; } }
+    @media print { body { background:white; } .shell { width:100%; margin:0; } header { padding:0 0 15px; } .tools, .add, footer { display:none; } .list { grid-template-columns:1fr 1fr; gap:9px; } .department { box-shadow:none; break-inside:avoid; } }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <div>
+        <div class="eyebrow">רשימת קניות אישית · לפי מחלקות</div>
+        <h1>כל הסל, לפי הסדר בסופר</h1>
+        <p class="subtitle">סמני את מה שנקנה, ערכי פריטים או כמות, והוסיפי מוצרים חדשים בכל מחלקה. כל השינויים נשמרים בדפדפן.</p>
+      </div>
+      <div class="tools"><button type="button" id="print">הדפסה / שמירה כ‑PDF</button><button type="button" id="clear">איפוס סימונים</button></div>
+    </header>
+    <div class="progress"><span>התקדמות הקנייה</span><strong id="progress">0 / 0 נקנו</strong></div>
+    <section class="list" id="list" aria-label="רשימת קניות לפי מחלקות"></section>
+    <footer>קובץ HTML עצמאי — מתאים להעלאה ישירה ל‑GitHub Pages ועובד גם ללא אינטרנט.</footer>
+  </main>
+  <template id="row-template"><div class="row blank"><input type="checkbox" aria-label="סימון מוצר"><input class="name" placeholder="מוצר נוסף"><input class="note" placeholder="כמות / הערה"></div></template>
+  <script>
+    const departments = [
+      { title:'פירות וירקות', hint:'התחילי כאן', items:[
+        ['ירוקים: כוסברה, פטרוזיליה, שמיר',''], ['עלים לסלט עלים',''], ['2 חבילות עלי סלק','2 חבילות'], ['שורש חזרת',''], ['גבעולי סלרי',''], ['שומר',''], ['קולורבי',''], ['דלעת',''], ['בצל ירוק + בצל סגול + בצל לבן',''], ['כרישה',''], ['תפוח אדמה',''], ['תפוח עץ',''], ['גזר',''], ['כרוב לבן','']
+      ]},
+      { title:'עשבי תיבול ותבלינים', hint:'ליד הירקות', items:[['עלי דפנה',''], ['תימין',''], ['מרווה','']]},
+      { title:'מעדנייה ודגים', hint:'לפי הצורך', items:[['סלמון פרוס','']]},
+      { title:'בשר ועוף', hint:'לפני הקופות', items:[['כרעיים','']]},
+      { title:'חלב וביצים', hint:'מקררים', items:[['חלב',''], ['ביצים',''], ['שמנת לבישול','2 יחידות'], ['שמנת אפייה להקצפה','2 יחידות'], ['חמאה','2 יחידות'], ['מסקרפונה','']]},
+      { title:'אפייה ואגוזים', hint:'מדפים יבשים', items:[['סוכר לבן','2 ק״ג'], ['שקדים פרוסים או מקולפים',''], ['פקאנים מסוכרים',''], ['צימוקאו','3 יחידות']]},
+      { title:'מזווה ורטבים', hint:'מדפים יבשים', items:[['שמן זית',''], ['חרדל',''], ['שאלוט','']]},
+      { title:'ממתקים', hint:'מדפים יבשים', items:[['שוקולד מריר','6 טבלאות']]},
+      { title:'טיפוח אישי', hint:'פארם', items:[['שמפו ד״ר פישר לשיער בלונדיני','']]}
+    ];
+    const list = document.querySelector('#list');
+    const template = document.querySelector('#row-template');
+    const storageKey = 'shopping-list-by-department-v1';
+
+    function row(item = ['', ''], blank = false, checked = false) {
+      const el = template.content.firstElementChild.cloneNode(true);
+      el.classList.toggle('blank', blank);
+      el.querySelector('[type=checkbox]').checked = checked;
+      el.querySelector('.name').value = item[0];
+      el.querySelector('.note').value = item[1];
+      bind(el);
+      return el;
+    }
+    function department(data, index) {
+      const section = document.createElement('article');
+      section.className = 'department'; section.dataset.id = index;
+      section.innerHTML = `<div class="department-head"><h2>${data.title}</h2><small>${data.hint}</small></div><div class="rows"></div><button type="button" class="add">+ הוספת שורה</button>`;
+      const rows = section.querySelector('.rows');
+      data.items.forEach(item => rows.append(row(item)));
+      for (let i = 0; i < 3; i++) rows.append(row(['',''], true));
+      section.querySelector('.add').addEventListener('click', () => { const fresh = row(['',''], true); rows.append(fresh); fresh.querySelector('.name').focus(); save(); });
+      return section;
+    }
+    function bind(el) { el.querySelectorAll('input').forEach(input => input.addEventListener('input', save)); el.querySelector('[type=checkbox]').addEventListener('change', save); }
+    function save() {
+      const data = [...document.querySelectorAll('.department')].map(section => [...section.querySelectorAll('.row')].map(el => ({
+        name:el.querySelector('.name').value, note:el.querySelector('.note').value, checked:el.querySelector('[type=checkbox]').checked, blank:el.classList.contains('blank')
+      })));
+      localStorage.setItem(storageKey, JSON.stringify(data)); updateProgress();
+    }
+    function restore() {
+      let saved; try { saved = JSON.parse(localStorage.getItem(storageKey)); } catch (_) { return; }
+      if (!Array.isArray(saved)) return;
+      saved.forEach((items, index) => { const target = document.querySelector(`[data-id="${index}"] .rows`); if (!target || !Array.isArray(items)) return; target.innerHTML = ''; items.forEach(item => target.append(row([item.name, item.note], item.blank, item.checked))); });
+    }
+    function updateProgress() {
+      const rows = [...document.querySelectorAll('.row')].filter(el => el.querySelector('.name').value.trim());
+      document.querySelector('#progress').textContent = `${rows.filter(el => el.querySelector('[type=checkbox]').checked).length} / ${rows.length} נקנו`;
+    }
+    departments.forEach((data, index) => list.append(department(data, index)));
+    restore(); updateProgress();
+    document.querySelector('#print').addEventListener('click', () => window.print());
+    document.querySelector('#clear').addEventListener('click', () => { if (confirm('לאפס את כל הסימונים? שמות והערות יישארו.')) { document.querySelectorAll('[type=checkbox]').forEach(el => el.checked = false); save(); } });
+  </script>
+</body>
+</html>
