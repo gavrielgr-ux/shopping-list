@@ -222,6 +222,7 @@ function startList(id) {
   function save(immediately = false) {
     const payload = currentPayload();
     const serialized = JSON.stringify(payload);
+    lastSavedAt = payload.updatedAt;
     localStorage.setItem(localStorageKey, serialized);
     setListTitle(payload.name);
     updateProgress();
@@ -229,7 +230,6 @@ function startList(id) {
     clearTimeout(saveTimer);
     setSync('שמירת שינויים…');
     const write = () => {
-      lastSavedAt = payload.updatedAt;
       set(cloudList, payload)
         .then(() => setSync('מסונכרן עכשיו'))
         .catch(() => setSync('הסנכרון אינו זמין כרגע — נשמר במכשיר', true));

@@ -62,5 +62,6 @@ export function removeListFromRecent(recentLists, id) {
 }
 
 export function shouldApplyRemoteUpdate(payload, lastSavedAt) {
-  return !Number.isFinite(payload?.updatedAt) || payload.updatedAt !== lastSavedAt;
+  if (!Number.isFinite(payload?.updatedAt)) return !Number.isFinite(lastSavedAt);
+  return !Number.isFinite(lastSavedAt) || payload.updatedAt > lastSavedAt;
 }
