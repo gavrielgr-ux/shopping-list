@@ -15,10 +15,12 @@ export function createListId(uuid = () => crypto.randomUUID()) {
 export function normalizePayload(value, fallbackName = DEFAULT_LIST_NAME) {
   if (Array.isArray(value)) return { name: fallbackName, departments: value };
   if (value && Array.isArray(value.departments)) {
-    return {
+    const payload = {
       name: String(value.name || fallbackName).trim() || fallbackName,
       departments: value.departments
     };
+    if (Number.isFinite(value.updatedAt)) payload.updatedAt = value.updatedAt;
+    return payload;
   }
   return null;
 }
@@ -57,4 +59,8 @@ export function normalizeDepartmentRecords(records, defaults = []) {
 
 export function removeListFromRecent(recentLists, id) {
   return Array.isArray(recentLists) ? recentLists.filter(item => item.id !== id) : [];
+}
+
+export function shouldApplyRemoteUpdate(payload, lastSavedAt) {
+  return !Number.isFinite(payload?.updatedAt) || payload.updatedAt !== lastSavedAt;
 }

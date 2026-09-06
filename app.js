@@ -9,7 +9,8 @@ import {
   normalizeDepartmentRecords,
   normalizePayload,
   payloadForSave,
-  removeListFromRecent
+  removeListFromRecent,
+  shouldApplyRemoteUpdate
 } from './list-model.js';
 
 const firebaseConfig = {
@@ -118,7 +119,7 @@ function startList(id) {
   const rememberedName = readRecentLists().find(item => item.id === id)?.name;
   let cloudReady = false;
   let saveTimer;
-  let lastSavedContent = '';
+  let lastSavedAt = null;
   let deleting = false;
 
   listNameInput.value = rememberedName || DEFAULT_LIST_NAME;
@@ -201,9 +202,6 @@ function startList(id) {
   function currentPayload() {
     return payloadForSave(listNameInput.value, snapshotDepartments());
   }
-  function contentOf(payload) {
-    return JSON.stringify({ name: payload.name, departments: payload.departments });
-  }
   function updateProgress() {
     const rows = [...list.querySelectorAll('.row')].filter(element => element.querySelector('.name').value.trim());
     const done = rows.filter(element => element.querySelector('[type=checkbox]').checked).length;
@@ -231,7 +229,7 @@ function startList(id) {
     clearTimeout(saveTimer);
     setSync('שמירת שינויים…');
     const write = () => {
-      lastSavedContent = contentOf(payload);
+      lastSavedAt = payload.updatedAt;
       set(cloudList, payload)
         .then(() => setSync('מסונכרן עכשיו'))
         .catch(() => setSync('הסנכרון אינו זמין כרגע — נשמר במכשיר', true));
@@ -259,7 +257,7 @@ function startList(id) {
         }
         if (result.exists()) {
           const incoming = normalizePayload(result.val());
-          if (incoming && contentOf(incoming) !== lastSavedContent) restore(incoming);
+          if (incoming && shouldApplyRemoteUpdate(incoming, lastSavedAt)) restore(incoming);
           setSync('מסונכרן עם הרשימה המשותפת');
         } else {
           save(true);
