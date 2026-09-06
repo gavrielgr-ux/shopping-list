@@ -21,8 +21,6 @@
     .progress strong { color:var(--green); }
     .sync { display:block; color:var(--muted); font-size:.78rem; margin-top:2px; }
     .sync.error { color:#a53c2b; }
-    .account { display:flex; align-items:center; gap:7px; }
-    .account button { padding:7px 10px; font-size:.82rem; background:white; }
     .list { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; align-items:start; }
     .department { background:var(--card); border:1px solid var(--line); border-radius:16px; overflow:hidden; box-shadow:var(--shadow); }
     .department-head { background:#edf4ee; padding:12px 15px; display:flex; align-items:center; justify-content:space-between; gap:10px; }
@@ -51,14 +49,14 @@
       </div>
       <div class="tools"><button type="button" id="print">הדפסה / שמירה כ‑PDF</button><button type="button" id="clear">איפוס סימונים</button></div>
     </header>
-    <div class="progress"><span>התקדמות הקנייה<small id="sync" class="sync">נדרשת התחברות עם Google לסנכרון</small></span><div class="account"><button type="button" id="sign-in">התחברות עם Google</button><button type="button" id="sign-out" hidden>התנתקות</button><strong id="progress">0 / 0 נקנו</strong></div></div>
+    <div class="progress"><span>התקדמות הקנייה<small id="sync" class="sync">מתחבר לסנכרון…</small></span><strong id="progress">0 / 0 נקנו</strong></div>
     <section class="list" id="list" aria-label="רשימת קניות לפי מחלקות"></section>
     <footer>קובץ HTML עצמאי — מתאים להעלאה ישירה ל‑GitHub Pages ועובד גם ללא אינטרנט.</footer>
   </main>
   <template id="row-template"><div class="row blank"><input type="checkbox" aria-label="סימון מוצר"><input class="name" placeholder="מוצר נוסף"><input class="note" placeholder="כמות / הערה"></div></template>
   <script type="module">
     import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.18.0/firebase-app.js';
-    import { GoogleAuthProvider, getAuth, onAuthStateChanged, signInWithRedirect, signOut } from 'https://www.gstatic.com/firebasejs/12.18.0/firebase-auth.js';
+    import { getAuth, signInAnonymously } from 'https://www.gstatic.com/firebasejs/12.18.0/firebase-auth.js';
     import { getDatabase, onValue, ref, set } from 'https://www.gstatic.com/firebasejs/12.18.0/firebase-database.js';
 
     const firebaseConfig = {
@@ -73,8 +71,6 @@
     const app = initializeApp(firebaseConfig);
     const auth = getAuth(app);
     const database = getDatabase(app);
-    const googleProvider = new GoogleAuthProvider();
-    googleProvider.setCustomParameters({ prompt: 'select_account' });
     // Anyone opening this copy of the page joins the same household list.
     const cloudList = ref(database, 'shared-lists/rehovot-family-4d7f8c12');
     const departments = [
@@ -94,11 +90,8 @@
     const template = document.querySelector('#row-template');
     const storageKey = 'shopping-list-by-department-v1';
     const sync = document.querySelector('#sync');
-    const signInButton = document.querySelector('#sign-in');
-    const signOutButton = document.querySelector('#sign-out');
     let cloudReady = false;
     let saveTimer;
-    let stopListening = () => {};
 
     function row(item = ['', ''], blank = false, checked = false) {
       const el = template.content.firstElementChild.cloneNode(true);
@@ -151,18 +144,10 @@
       const rows = [...document.querySelectorAll('.row')].filter(el => el.querySelector('.name').value.trim());
       document.querySelector('#progress').textContent = `${rows.filter(el => el.querySelector('[type=checkbox]').checked).length} / ${rows.length} נקנו`;
     }
-    function connectCloud() {
-      onAuthStateChanged(auth, user => {
-        stopListening();
-        cloudReady = false;
-        signInButton.hidden = Boolean(user);
-        signOutButton.hidden = !user;
-        if (!user) {
-          setSync('נדרשת התחברות עם Google לסנכרון');
-          return;
-        }
-        setSync(`מחובר/ת כ־${user.email}`);
-        stopListening = onValue(cloudList, async result => {
+    async function connectCloud() {
+      try {
+        if (!auth.currentUser) await signInAnonymously(auth);
+        onValue(cloudList, async result => {
           cloudReady = true;
           if (result.exists()) {
             restore(result.val());
@@ -172,14 +157,13 @@
             setSync('נוצרה רשימה משותפת ומסונכרנת');
           }
         }, () => setSync('לא ניתן לסנכרן כרגע — נשמר במכשיר', true));
-      });
+      } catch (_) {
+        setSync('יש להפעיל Anonymous ב‑Firebase כדי לסנכרן', true);
+      }
     }
     departments.forEach((data, index) => list.append(department(data, index)));
     let localCopy; try { localCopy = JSON.parse(localStorage.getItem(storageKey)); } catch (_) { localCopy = null; }
     restore(localCopy); updateProgress(); connectCloud();
-    signInButton.addEventListener('click', () => signInWithRedirect(auth, googleProvider)
-      .catch(() => setSync('לא ניתן להתחבר עם Google כרגע', true)));
-    signOutButton.addEventListener('click', () => signOut(auth));
     document.querySelector('#print').addEventListener('click', () => window.print());
     document.querySelector('#clear').addEventListener('click', () => { if (confirm('לאפס את כל הסימונים? שמות והערות יישארו.')) { document.querySelectorAll('[type=checkbox]').forEach(el => el.checked = false); save(); } });
   </script>
