@@ -3,169 +3,78 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#274e3f">
-  <title>רשימת קניות לפי מחלקות</title>
+  <meta name="theme-color" content="#173c33">
+  <meta name="description" content="רשימות קניות משותפות, מסודרות לפי מחלקות.">
+  <title>רשימת קניות משותפת</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;700;800&display=swap" rel="stylesheet">
   <style>
-    :root { --ink:#183329; --muted:#65766c; --paper:#f4f2eb; --card:#fffefa; --line:#dbe3da; --green:#286a51; --mint:#e9f1eb; --shadow:0 12px 34px rgba(24,51,41,.09); }
+    :root { --fig:#173c33; --fig-soft:#e2eee5; --citrus:#f1ba35; --berry:#a9424d; --paper:#f7f8f1; --white:#fff; --ink:#17332c; --muted:#62736d; --line:#d6e0d8; --shadow:0 14px 32px rgba(23,60,51,.10); }
     * { box-sizing:border-box; }
-    body { margin:0; color:var(--ink); background:var(--paper); font-family:Arial,"Noto Sans Hebrew",sans-serif; line-height:1.4; }
-    .shell { width:min(1020px,calc(100% - 28px)); margin:0 auto 56px; }
-    header { display:flex; justify-content:space-between; align-items:end; gap:18px; padding:34px 0 25px; }
-    .eyebrow { color:var(--green); font-weight:800; font-size:.83rem; letter-spacing:.04em; }
-    h1 { margin:4px 0 7px; font-size:clamp(1.8rem,4vw,2.75rem); letter-spacing:-.04em; }
-    .subtitle { max-width:650px; margin:0; color:var(--muted); }
-    .tools { display:flex; gap:9px; flex-wrap:wrap; }
-    button { border:1px solid var(--line); border-radius:10px; cursor:pointer; font:inherit; font-weight:700; padding:9px 12px; color:var(--ink); background:var(--card); }
-    button:hover { background:#e8f1e9; }
-    .progress { background:var(--mint); border:1px solid #d2e0d4; border-radius:14px; padding:13px 16px; margin:0 0 18px; display:flex; justify-content:space-between; align-items:center; gap:14px; }
-    .progress strong { color:var(--green); }
-    .sync { display:block; color:var(--muted); font-size:.78rem; margin-top:2px; }
-    .sync.error { color:#a53c2b; }
-    .list { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; align-items:start; }
-    .department { background:var(--card); border:1px solid var(--line); border-radius:16px; overflow:hidden; box-shadow:var(--shadow); }
-    .department-head { background:#edf4ee; padding:12px 15px; display:flex; align-items:center; justify-content:space-between; gap:10px; }
-    .department h2 { margin:0; font-size:1.08rem; }
-    .department small { color:var(--muted); }
-    .row { display:grid; grid-template-columns:27px minmax(0,1fr) 128px; gap:8px; align-items:center; min-height:45px; padding:6px 11px; border-bottom:1px solid #edf0eb; }
-    .row input[type=checkbox] { width:18px; height:18px; cursor:pointer; accent-color:var(--green); }
-    .name, .note { min-width:0; width:100%; border:1px solid transparent; border-radius:7px; padding:5px 6px; background:transparent; color:var(--ink); }
-    .name:hover, .name:focus, .note:hover, .note:focus { outline:0; border-color:#bfd1c2; background:white; }
-    .note { color:var(--muted); font-size:.82rem; text-align:left; }
-    .row:has(input:checked) .name, .row:has(input:checked) .note { color:#8d9a91; text-decoration:line-through; }
-    .blank .name::placeholder, .blank .note::placeholder { color:#a0aaa4; }
-    .add { margin:9px 11px 11px; padding:6px 10px; font-size:.83rem; background:transparent; }
-    footer { margin-top:18px; text-align:center; color:var(--muted); font-size:.83rem; }
-    @media (max-width:750px) { header { align-items:start; flex-direction:column; padding-top:25px; } .tools { width:100%; } .tools button { flex:1; } .list { grid-template-columns:1fr; } .row { grid-template-columns:27px minmax(0,1fr) 105px; } }
-    @media print { body { background:white; } .shell { width:100%; margin:0; } header { padding:0 0 15px; } .tools, .add, footer { display:none; } .list { grid-template-columns:1fr 1fr; gap:9px; } .department { box-shadow:none; break-inside:avoid; } }
+    body { margin:0; background:var(--paper); color:var(--ink); font-family:Heebo,Arial,sans-serif; line-height:1.45; }
+    button,input { font:inherit; } button { cursor:pointer; }
+    .shell { width:min(1080px,calc(100% - 28px)); margin:0 auto 52px; }
+    .masthead { display:flex; justify-content:space-between; align-items:center; gap:18px; padding:23px 0 18px; border-bottom:2px solid var(--fig); }
+    .brand { font-size:.9rem; font-weight:800; letter-spacing:.03em; color:var(--fig); }.brand::before { content:"●"; color:var(--citrus); margin-left:8px; }
+    .mast-actions,.tools { display:flex; flex-wrap:wrap; gap:8px; }
+    .button { min-height:42px; padding:8px 13px; border:1px solid var(--fig); background:transparent; color:var(--fig); border-radius:8px; font-weight:700; }.button:hover { background:var(--fig-soft); }.button.primary { background:var(--fig); color:var(--white); }.button.primary:hover { background:#0f2d26; }.button.subtle { border-color:var(--line); background:var(--white); }
+    .list-hero { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:24px; align-items:end; padding:25px 0 19px; }.eyebrow { margin:0 0 6px; color:var(--berry); font-weight:800; font-size:.82rem; letter-spacing:.05em; }h1 { margin:0; font-size:clamp(2rem,5.5vw,3.45rem); line-height:1.02; letter-spacing:-.045em; }.subtitle { max-width:650px; margin:12px 0 0; color:var(--muted); }
+    .name-box { position:relative; min-width:min(100%,295px); padding:12px 15px 13px; background:var(--citrus); color:var(--fig); box-shadow:7px 7px 0 var(--fig); border-radius:6px; }.name-box::after { content:""; position:absolute; left:17px; top:-6px; width:34px; height:12px; background:rgba(255,255,255,.62); transform:rotate(-4deg); }.name-box label { display:block; font-weight:800; font-size:.77rem; margin-bottom:3px; }.name-box input { display:block; width:100%; min-height:34px; padding:1px 0; border:0; border-bottom:2px solid rgba(23,60,51,.55); background:transparent; color:var(--fig); font-size:1.22rem; font-weight:800; outline-offset:3px; }.name-box input:focus { border-bottom-color:var(--fig); }
+    .progress-strip { display:grid; grid-template-columns:1fr auto; gap:14px; align-items:center; padding:15px 17px; background:var(--fig); color:var(--white); border-radius:7px; }.progress-label { display:flex; align-items:center; gap:12px; font-weight:700; }.track { flex:1; max-width:250px; min-width:70px; height:8px; overflow:hidden; background:rgba(255,255,255,.25); border-radius:99px; }.bar { width:0; height:100%; background:var(--citrus); transition:width .2s ease; }.sync { display:block; margin-top:2px; color:#d4e2d8; font-size:.8rem; font-weight:400; }.sync.error { color:#ffe1ac; }.progress-value { color:var(--citrus); font-size:1.1rem; font-weight:800; white-space:nowrap; }
+    .list { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; align-items:start; margin-top:18px; }.department { background:var(--white); border-top:5px solid var(--fig); box-shadow:var(--shadow); }.department-head { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:12px 15px; background:var(--fig-soft); }.department h2 { margin:0; font-size:1.08rem; }.department small { color:var(--muted); }
+    .row { display:grid; grid-template-columns:30px minmax(0,1fr) 134px; gap:8px; align-items:center; min-height:47px; padding:6px 12px; border-bottom:1px solid var(--line); }.row input[type="checkbox"] { width:19px; height:19px; accent-color:var(--fig); cursor:pointer; }.name,.note { min-width:0; width:100%; border:1px solid transparent; background:transparent; color:var(--ink); padding:5px 6px; border-radius:4px; }.name:hover,.note:hover,.name:focus,.note:focus { border-color:#b6ccbc; background:#fcfefb; outline:0; }.note { color:var(--muted); text-align:left; font-size:.84rem; }.row:has(input:checked) .name,.row:has(input:checked) .note { color:#8a9991; text-decoration:line-through; }.blank .name::placeholder,.blank .note::placeholder { color:#9ba8a1; }.add { min-height:39px; margin:10px 12px 13px; padding:5px 10px; border:1px dashed #9cb6a4; border-radius:5px; background:transparent; color:var(--fig); font-weight:700; }.add:hover { background:var(--fig-soft); }
+    footer { margin-top:23px; color:var(--muted); font-size:.84rem; text-align:center; }.sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
+    dialog { width:min(480px,calc(100% - 30px)); border:0; padding:0; color:var(--ink); background:var(--white); box-shadow:0 24px 70px rgba(23,60,51,.32); }dialog::backdrop { background:rgba(15,43,35,.48); }.dialog-inner { padding:22px; }.dialog-title { margin:0 0 4px; font-size:1.45rem; }.dialog-copy { margin:0 0 16px; color:var(--muted); }.field-label { display:block; margin-bottom:6px; font-weight:700; }.field { width:100%; min-height:44px; padding:8px 10px; border:1px solid var(--line); border-radius:5px; color:var(--ink); background:var(--white); font-size:1rem; }.field:focus { outline:2px solid var(--citrus); outline-offset:1px; border-color:var(--fig); }.dialog-actions { display:flex; justify-content:flex-start; gap:8px; flex-wrap:wrap; margin-top:16px; }.dialog-divider { margin:22px 0 15px; border:0; border-top:1px solid var(--line); }.recent-lists { display:grid; gap:7px; margin:0; padding:0; list-style:none; }.recent-list { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:8px 0; border-bottom:1px solid var(--line); }.recent-list:last-child { border-bottom:0; }.recent-list button { border:0; background:transparent; color:var(--fig); padding:6px 0; text-align:right; font-weight:700; }.recent-list button:hover { text-decoration:underline; }.recent-list small,.empty-lists { color:var(--muted); }.empty-lists { margin:0; }
+    @media (max-width:720px) { .shell { width:min(100% - 22px,620px); }.masthead { align-items:flex-start; flex-direction:column; padding:17px 0 15px; }.mast-actions { width:100%; }.mast-actions .button { flex:1; }.list-hero { grid-template-columns:1fr; gap:18px; padding-top:22px; }.name-box { width:calc(100% - 8px); }.progress-strip { grid-template-columns:1fr; gap:5px; }.progress-label { display:grid; grid-template-columns:auto 1fr; }.track { max-width:none; }.list { grid-template-columns:1fr; } }
+    @media (max-width:410px) { .row { grid-template-columns:27px minmax(0,1fr) 95px; padding-inline:8px; }.note { font-size:.78rem; } }
+    @media print { body { background:#fff; }.shell { width:100%; margin:0; }.masthead,.tools,.mast-actions,.add,footer { display:none; }.list-hero { padding:0 0 15px; }.name-box { box-shadow:none; }.progress-strip { color:#000; background:#fff; border:1px solid #999; }.sync,.progress-value { color:#000; }.list { grid-template-columns:1fr 1fr; gap:9px; }.department { box-shadow:none; break-inside:avoid; border:1px solid #999; } }
   </style>
 </head>
 <body>
   <main class="shell">
-    <header>
-      <div>
-        <div class="eyebrow">רשימת קניות אישית · לפי מחלקות</div>
-        <h1>כל הסל, לפי הסדר בסופר</h1>
-        <p class="subtitle">סמני את מה שנקנה, ערכי פריטים או כמות, והוסיפי מוצרים חדשים בכל מחלקה. כל השינויים נשמרים בדפדפן.</p>
-      </div>
-      <div class="tools"><button type="button" id="print">הדפסה / שמירה כ‑PDF</button><button type="button" id="clear">איפוס סימונים</button></div>
-    </header>
-    <div class="progress"><span>התקדמות הקנייה<small id="sync" class="sync">מתחבר לסנכרון…</small></span><strong id="progress">0 / 0 נקנו</strong></div>
-    <section class="list" id="list" aria-label="רשימת קניות לפי מחלקות"></section>
-    <footer>קובץ HTML עצמאי — מתאים להעלאה ישירה ל‑GitHub Pages ועובד גם ללא אינטרנט.</footer>
+    <header class="masthead"><div class="brand">רשימות קנייה משותפות</div><div class="mast-actions"><button class="button subtle" type="button" id="share-list">שיתוף קישור</button><button class="button primary" type="button" id="open-lists">רשימות</button></div></header>
+    <section class="list-hero" aria-labelledby="page-title"><div><p class="eyebrow">לפי מחלקות · מסונכרן בין מכשירים</p><h1 id="page-title">כל הסל, לפי הסדר</h1><p class="subtitle">אפשר לסמן מה כבר נקנה, לערוך פריטים וכמויות, ולהוסיף שורות בכל מחלקה. הקישור של כל רשימה נשאר קבוע לשיתוף.</p></div><div class="name-box"><label for="list-name">שם הרשימה</label><input id="list-name" maxlength="60" autocomplete="off" value="רשימת קניות" aria-describedby="name-help"><span id="name-help" class="sr-only">השם נשמר ומופיע לכל מי שפותח את הקישור</span></div></section>
+    <section class="progress-strip" aria-label="התקדמות קנייה"><div class="progress-label"><span>התקדמות הקנייה</span><div class="track" role="progressbar" aria-label="התקדמות הקנייה" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="bar" id="progress-bar"></div></div></div><div><strong class="progress-value" id="progress">0 / 0</strong><span id="sync" class="sync" aria-live="polite">מתחבר לסנכרון…</span></div></section>
+    <div class="tools" aria-label="פעולות רשימה" style="margin-top:14px;"><button class="button subtle" type="button" id="print">הדפסה / שמירה כ‑PDF</button><button class="button subtle" type="button" id="clear">איפוס סימונים</button></div>
+    <section class="list" id="list" aria-label="רשימת קניות לפי מחלקות"></section><footer>כל רשימה מקבלת קישור משלה. פתיחת קישור משותף מצרפת לאותה רשימה.</footer>
   </main>
+  <dialog id="lists-dialog" aria-labelledby="lists-title"><div class="dialog-inner"><h2 class="dialog-title" id="lists-title">רשימות</h2><p class="dialog-copy">אפשר ליצור רשימה חדשה עם קישור נפרד, או לעבור לרשימה שנפתחה במכשיר זה.</p><form id="new-list-form"><label class="field-label" for="new-list-name">שם הרשימה החדשה</label><input class="field" id="new-list-name" maxlength="60" required value="רשימה חדשה" autocomplete="off"><div class="dialog-actions"><button class="button primary" type="submit">יצירת רשימה</button><button class="button" type="button" id="close-lists">סגירה</button></div></form><hr class="dialog-divider"><h3 class="dialog-title" style="font-size:1.08rem;">רשימות במכשיר זה</h3><ul class="recent-lists" id="recent-lists"></ul></div></dialog>
   <template id="row-template"><div class="row blank"><input type="checkbox" aria-label="סימון מוצר"><input class="name" placeholder="מוצר נוסף"><input class="note" placeholder="כמות / הערה"></div></template>
   <script type="module">
     import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.18.0/firebase-app.js';
     import { getAuth, signInAnonymously } from 'https://www.gstatic.com/firebasejs/12.18.0/firebase-auth.js';
     import { getDatabase, onValue, ref, set } from 'https://www.gstatic.com/firebasejs/12.18.0/firebase-database.js';
+    import { DEFAULT_LIST_NAME, createListId, getListIdFromLocation, normalizePayload, payloadForSave } from './list-model.js';
 
-    const firebaseConfig = {
-      apiKey: 'AIzaSyBTNbSh9PgI9cTc67YyLjEuULkg6ACB6SA',
-      authDomain: 'shopping-list-27ffd.firebaseapp.com',
-      databaseURL: 'https://shopping-list-27ffd-default-rtdb.firebaseio.com',
-      projectId: 'shopping-list-27ffd',
-      storageBucket: 'shopping-list-27ffd.firebasestorage.app',
-      messagingSenderId: '512815948415',
-      appId: '1:512815948415:web:9e2b3d8d8e13d2dd44954a'
-    };
-    const app = initializeApp(firebaseConfig);
-    const auth = getAuth(app);
-    const database = getDatabase(app);
-    // Anyone opening this copy of the page joins the same household list.
-    const cloudList = ref(database, 'shared-lists/rehovot-family-4d7f8c12');
+    const firebaseConfig = { apiKey:'AIzaSyBTNbSh9PgI9cTc67YyLjEuULkg6ACB6SA', authDomain:'shopping-list-27ffd.firebaseapp.com', databaseURL:'https://shopping-list-27ffd-default-rtdb.firebaseio.com', projectId:'shopping-list-27ffd', storageBucket:'shopping-list-27ffd.firebasestorage.app', messagingSenderId:'512815948415', appId:'1:512815948415:web:9e2b3d8d8e13d2dd44954a' };
     const departments = [
-      { title:'פירות וירקות', hint:'התחילי כאן', items:[
-        ['ירוקים: כוסברה, פטרוזיליה, שמיר',''], ['עלים לסלט עלים',''], ['2 חבילות עלי סלק','2 חבילות'], ['שורש חזרת',''], ['גבעולי סלרי',''], ['שומר',''], ['קולורבי',''], ['דלעת',''], ['בצל ירוק + בצל סגול + בצל לבן',''], ['כרישה',''], ['תפוח אדמה',''], ['תפוח עץ',''], ['גזר',''], ['כרוב לבן','']
-      ]},
-      { title:'עשבי תיבול ותבלינים', hint:'ליד הירקות', items:[['עלי דפנה',''], ['תימין',''], ['מרווה','']]},
-      { title:'מעדנייה ודגים', hint:'לפי הצורך', items:[['סלמון פרוס','']]},
-      { title:'בשר ועוף', hint:'לפני הקופות', items:[['כרעיים','']]},
-      { title:'חלב וביצים', hint:'מקררים', items:[['חלב',''], ['ביצים',''], ['שמנת לבישול','2 יחידות'], ['שמנת אפייה להקצפה','2 יחידות'], ['חמאה','2 יחידות'], ['מסקרפונה','']]},
-      { title:'אפייה ואגוזים', hint:'מדפים יבשים', items:[['סוכר לבן','2 ק״ג'], ['שקדים פרוסים או מקולפים',''], ['פקאנים מסוכרים',''], ['צימוקאו','3 יחידות']]},
-      { title:'מזווה ורטבים', hint:'מדפים יבשים', items:[['שמן זית',''], ['חרדל',''], ['שאלוט','']]},
-      { title:'ממתקים', hint:'מדפים יבשים', items:[['שוקולד מריר','6 טבלאות']]},
-      { title:'טיפוח אישי', hint:'פארם', items:[['שמפו ד״ר פישר לשיער בלונדיני','']]}
-    ];
-    const list = document.querySelector('#list');
-    const template = document.querySelector('#row-template');
-    const storageKey = 'shopping-list-by-department-v1';
-    const sync = document.querySelector('#sync');
-    let cloudReady = false;
-    let saveTimer;
-
-    function row(item = ['', ''], blank = false, checked = false) {
-      const el = template.content.firstElementChild.cloneNode(true);
-      el.classList.toggle('blank', blank);
-      el.querySelector('[type=checkbox]').checked = checked;
-      el.querySelector('.name').value = item[0];
-      el.querySelector('.note').value = item[1];
-      bind(el);
-      return el;
-    }
-    function department(data, index) {
-      const section = document.createElement('article');
-      section.className = 'department'; section.dataset.id = index;
-      section.innerHTML = `<div class="department-head"><h2>${data.title}</h2><small>${data.hint}</small></div><div class="rows"></div><button type="button" class="add">+ הוספת שורה</button>`;
-      const rows = section.querySelector('.rows');
-      data.items.forEach(item => rows.append(row(item)));
-      for (let i = 0; i < 3; i++) rows.append(row(['',''], true));
-      section.querySelector('.add').addEventListener('click', () => { const fresh = row(['',''], true); rows.append(fresh); fresh.querySelector('.name').focus(); save(); });
-      return section;
-    }
-    function bind(el) { el.querySelectorAll('input').forEach(input => input.addEventListener('input', save)); el.querySelector('[type=checkbox]').addEventListener('change', save); }
-    function snapshot() {
-      return [...document.querySelectorAll('.department')].map(section => [...section.querySelectorAll('.row')].map(el => ({
-        name:el.querySelector('.name').value, note:el.querySelector('.note').value, checked:el.querySelector('[type=checkbox]').checked, blank:el.classList.contains('blank')
-      })));
-    }
-    function setSync(message, error = false) { sync.textContent = message; sync.classList.toggle('error', error); }
-    function save() {
-      const data = snapshot();
-      localStorage.setItem(storageKey, JSON.stringify(data)); updateProgress();
-      if (!cloudReady) return;
-      clearTimeout(saveTimer);
-      setSync('שומר שינויים…');
-      saveTimer = setTimeout(() => set(cloudList, data)
-        .then(() => setSync('מסונכרן עכשיו'))
-        .catch(() => setSync('לא ניתן לסנכרן כרגע — נשמר במכשיר', true)), 350);
-    }
-    function restore(saved) {
-      if (!Array.isArray(saved)) return false;
-      saved.forEach((items, index) => {
-        const target = document.querySelector(`[data-id="${index}"] .rows`);
-        if (!target || !Array.isArray(items)) return;
-        target.innerHTML = '';
-        items.forEach(item => target.append(row([item.name || '', item.note || ''], Boolean(item.blank), Boolean(item.checked))));
-      });
-      updateProgress();
-      return true;
-    }
-    function updateProgress() {
-      const rows = [...document.querySelectorAll('.row')].filter(el => el.querySelector('.name').value.trim());
-      document.querySelector('#progress').textContent = `${rows.filter(el => el.querySelector('[type=checkbox]').checked).length} / ${rows.length} נקנו`;
-    }
-    async function connectCloud() {
-      try {
-        if (!auth.currentUser) await signInAnonymously(auth);
-        onValue(cloudList, async result => {
-          cloudReady = true;
-          if (result.exists()) {
-            restore(result.val());
-            setSync('מסונכרן עם הרשימה המשותפת');
-          } else {
-            await set(cloudList, snapshot());
-            setSync('נוצרה רשימה משותפת ומסונכרנת');
-          }
-        }, () => setSync('לא ניתן לסנכרן כרגע — נשמר במכשיר', true));
-      } catch (_) {
-        setSync('יש להפעיל Anonymous ב‑Firebase כדי לסנכרן', true);
-      }
-    }
-    departments.forEach((data, index) => list.append(department(data, index)));
-    let localCopy; try { localCopy = JSON.parse(localStorage.getItem(storageKey)); } catch (_) { localCopy = null; }
-    restore(localCopy); updateProgress(); connectCloud();
-    document.querySelector('#print').addEventListener('click', () => window.print());
-    document.querySelector('#clear').addEventListener('click', () => { if (confirm('לאפס את כל הסימונים? שמות והערות יישארו.')) { document.querySelectorAll('[type=checkbox]').forEach(el => el.checked = false); save(); } });
+      { title:'פירות וירקות', hint:'תחילת הסיבוב', items:[['ירוקים: כוסברה, פטרוזיליה, שמיר',''],['עלים לסלט עלים',''],['2 חבילות עלי סלק','2 חבילות'],['שורש חזרת',''],['גבעולי סלרי',''],['שומר',''],['קולורבי',''],['דלעת',''],['בצל ירוק + בצל סגול + בצל לבן',''],['כרישה',''],['תפוח אדמה',''],['תפוח עץ',''],['גזר',''],['כרוב לבן','']]},
+      { title:'עשבי תיבול ותבלינים', hint:'ליד הירקות', items:[['עלי דפנה',''],['תימין',''],['מרווה','']]}, { title:'מעדנייה ודגים', hint:'לפי הצורך', items:[['סלמון פרוס','']]}, { title:'בשר ועוף', hint:'לפני הקופות', items:[['כרעיים','']]},
+      { title:'חלב וביצים', hint:'מקררים', items:[['חלב',''],['ביצים',''],['שמנת לבישול','2 יחידות'],['שמנת אפייה להקצפה','2 יחידות'],['חמאה','2 יחידות'],['מסקרפונה','']]}, { title:'אפייה ואגוזים', hint:'מדפים יבשים', items:[['סוכר לבן','2 ק״ג'],['שקדים פרוסים או מקולפים',''],['פקאנים מסוכרים',''],['צימוקאו','3 יחידות']]},
+      { title:'מזווה ורטבים', hint:'מדפים יבשים', items:[['שמן זית',''],['חרדל',''],['שאלוט','']]}, { title:'ממתקים', hint:'מדפים יבשים', items:[['שוקולד מריר','6 טבלאות']]}, { title:'טיפוח אישי', hint:'פארם', items:[['שמפו ד״ר פישר לשיער בלונדיני','']]} ];
+    const app = initializeApp(firebaseConfig), auth = getAuth(app), database = getDatabase(app), listId = getListIdFromLocation(window.location.href), cloudList = ref(database, `shared-lists/${listId}`);
+    const list = document.querySelector('#list'), template = document.querySelector('#row-template'), listNameInput = document.querySelector('#list-name'), sync = document.querySelector('#sync'), dialog = document.querySelector('#lists-dialog');
+    const localStorageKey = `shopping-list:${listId}`, recentStorageKey = 'shopping-list:recent-lists'; let cloudReady = false, saveTimer, lastSavedContent = '';
+    function row(item=['',''], blank=false, checked=false) { const el=template.content.firstElementChild.cloneNode(true); el.classList.toggle('blank',blank); el.querySelector('[type=checkbox]').checked=checked; el.querySelector('.name').value=item[0]; el.querySelector('.note').value=item[1]; bind(el); return el; }
+    function department(data,index) { const section=document.createElement('article'); section.className='department'; section.dataset.id=index; section.innerHTML=`<div class="department-head"><h2>${data.title}</h2><small>${data.hint}</small></div><div class="rows"></div><button type="button" class="add">+ הוספת שורה</button>`; const rows=section.querySelector('.rows'); data.items.forEach(item=>rows.append(row(item))); for(let count=0;count<3;count+=1) rows.append(row(['',''],true)); section.querySelector('.add').addEventListener('click',()=>{const fresh=row(['',''],true); rows.append(fresh); fresh.querySelector('.name').focus(); save();}); return section; }
+    function bind(el) { el.querySelectorAll('input').forEach(input=>input.addEventListener('input',save)); el.querySelector('[type=checkbox]').addEventListener('change',save); }
+    function snapshotDepartments() { return [...document.querySelectorAll('.department')].map(section=>[...section.querySelectorAll('.row')].map(el=>({name:el.querySelector('.name').value,note:el.querySelector('.note').value,checked:el.querySelector('[type=checkbox]').checked,blank:el.classList.contains('blank')}))); }
+    function currentPayload() { return payloadForSave(listNameInput.value,snapshotDepartments()); }
+    function contentOf(payload) { return JSON.stringify({name:payload.name,departments:payload.departments}); }
+    function setSync(message,error=false) { sync.textContent=message; sync.classList.toggle('error',error); }
+    function readRecentLists() { try { return JSON.parse(localStorage.getItem(recentStorageKey))||[]; } catch (_) { return []; } }
+    function rememberList(id,name) { const current=readRecentLists().filter(item=>item.id!==id); localStorage.setItem(recentStorageKey,JSON.stringify([{id,name:String(name||DEFAULT_LIST_NAME).trim()||DEFAULT_LIST_NAME},...current].slice(0,10))); }
+    function setListTitle(name) { document.title=`${name} · רשימות קנייה`; document.querySelector('#page-title').textContent=name; rememberList(listId,name); }
+    function restore(payload) { const data=normalizePayload(payload); if(!data) return false; listNameInput.value=data.name; data.departments.forEach((items,index)=>{const target=document.querySelector(`[data-id="${index}"] .rows`); if(!target||!Array.isArray(items)) return; target.innerHTML=''; items.forEach(item=>target.append(row([item.name||'',item.note||''],Boolean(item.blank),Boolean(item.checked))));}); setListTitle(data.name); updateProgress(); return true; }
+    function updateProgress() { const rows=[...document.querySelectorAll('.row')].filter(el=>el.querySelector('.name').value.trim()); const done=rows.filter(el=>el.querySelector('[type=checkbox]').checked).length, percent=rows.length?Math.round((done/rows.length)*100):0; document.querySelector('#progress').textContent=`${done} / ${rows.length}`; document.querySelector('#progress-bar').style.width=`${percent}%`; document.querySelector('.track').setAttribute('aria-valuenow',String(percent)); }
+    function save(immediately=false) { const payload=currentPayload(), serialized=JSON.stringify(payload); localStorage.setItem(localStorageKey,serialized); setListTitle(payload.name); updateProgress(); if(!cloudReady) return; clearTimeout(saveTimer); setSync('שמירת שינויים…'); const write=()=>{lastSavedContent=contentOf(payload); set(cloudList,payload).then(()=>setSync('מסונכרן עכשיו')).catch(()=>setSync('הסנכרון אינו זמין כרגע — נשמר במכשיר',true));}; if(immediately) write(); else saveTimer=setTimeout(write,350); }
+    function urlFor(id) { const next=new URL(window.location.href); if(id==='rehovot-family-4d7f8c12') next.searchParams.delete('list'); else next.searchParams.set('list',id); return next.href; }
+    function renderRecentLists() { const target=document.querySelector('#recent-lists'), recent=readRecentLists(); target.innerHTML=''; if(!recent.length) { target.innerHTML='<li class="empty-lists">עדיין אין רשימות נוספות במכשיר זה.</li>'; return; } recent.forEach(item=>{const element=document.createElement('li'), open=document.createElement('button'), label=document.createElement('small'); element.className='recent-list'; open.type='button'; open.textContent=item.name; open.addEventListener('click',()=>window.location.assign(urlFor(item.id))); label.textContent=item.id===listId?'הרשימה הנוכחית':'פתיחת רשימה'; element.append(open,label); target.append(element);}); }
+    async function shareCurrentList() { const url=urlFor(listId); try { if(navigator.share) await navigator.share({title:listNameInput.value||DEFAULT_LIST_NAME,url}); else { await navigator.clipboard.writeText(url); setSync('קישור הרשימה הועתק'); } } catch (_) { try { await navigator.clipboard.writeText(url); setSync('קישור הרשימה הועתק'); } catch (_) { setSync('אפשר להעתיק את הקישור משורת הכתובת',true); } } }
+    async function connectCloud() { try { if(!auth.currentUser) await signInAnonymously(auth); onValue(cloudList,result=>{ cloudReady=true; if(result.exists()) { const incoming=normalizePayload(result.val()); if(incoming&&contentOf(incoming)!==lastSavedContent) restore(incoming); setSync('מסונכרן עם הרשימה המשותפת'); } else { save(true); setSync('נוצרה רשימה משותפת ומסונכרנת'); } },()=>setSync('הסנכרון אינו זמין כרגע — נשמר במכשיר',true)); } catch (_) { setSync('יש להפעיל Anonymous ב‑Firebase כדי לסנכרן',true); } }
+    departments.forEach((data,index)=>list.append(department(data,index))); let localCopy=null; try { localCopy=JSON.parse(localStorage.getItem(localStorageKey)); } catch (_) {} if(!localCopy&&listId==='rehovot-family-4d7f8c12') { try { localCopy=JSON.parse(localStorage.getItem('shopping-list-by-department-v1')); } catch (_) {} } restore(localCopy); setListTitle(listNameInput.value||DEFAULT_LIST_NAME); updateProgress(); connectCloud();
+    listNameInput.addEventListener('input',save); document.querySelector('#print').addEventListener('click',()=>window.print()); document.querySelector('#clear').addEventListener('click',()=>{if(confirm('לאפס את כל הסימונים? שמות והערות יישארו.')) { document.querySelectorAll('[type=checkbox]').forEach(el=>{el.checked=false;}); save(); }}); document.querySelector('#open-lists').addEventListener('click',()=>{renderRecentLists(); dialog.showModal();}); document.querySelector('#close-lists').addEventListener('click',()=>dialog.close()); document.querySelector('#share-list').addEventListener('click',shareCurrentList); document.querySelector('#new-list-form').addEventListener('submit',event=>{event.preventDefault(); const name=document.querySelector('#new-list-name').value.trim()||DEFAULT_LIST_NAME, newId=createListId(); rememberList(newId,name); window.location.assign(urlFor(newId));});
   </script>
 </body>
 </html>
