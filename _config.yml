@@ -1,0 +1,9 @@
+# GitHub Pages serves this repository's root as the shopping list site.
+# The MCP server is tooling, not part of the published page, so keep it out of the build.
+# (Setting `exclude` replaces Jekyll's defaults, so the usual entries are repeated here.)
+exclude:
+  - mcp-server
+  - Gemfile
+  - Gemfile.lock
+  - node_modules
+  - vendor

@@ -1,0 +1,32 @@
+{
+  "name": "shopping-list-mcp-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "MCP server for the shared shopping list at https://gavrielgr-ux.github.io/shopping-list/",
+  "type": "module",
+  "bin": {
+    "shopping-list-mcp-server": "dist/src/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc",
+    "prepare": "npm run build",
+    "test": "npm run build && node --test \"dist/test/*.test.js\"",
+    "typecheck": "tsc --noEmit",
+    "inspect": "npm run build && npx @modelcontextprotocol/inspector node dist/src/index.js",
+    "doctor": "npm run build && node dist/src/doctor.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0"
+  }
+}
