@@ -260,16 +260,33 @@ through MCP.
 
 | Route | Does |
 | --- | --- |
-| `GET /api/list` | Read the list. `?pending_only=true`, `?category=`, `?list_id=` |
-| `POST /api/items` | Add items. `items` accepts plain strings or objects with `note`/`category` |
-| `POST /api/items/check` | Tick off or un-tick. `checked=false` to clear, `all=true` to reset |
-| `POST /api/items/remove` | Delete rows |
-| `POST /api/reset` | `mode=untick` keeps rows, `mode=remove` needs `confirm=true` |
+| `GET /api/list` | Read a list. `?pending_only=`, `?category=`, `?list_id=` |
+| `GET /api/lists` | List the reachable lists |
 | `GET /api/link` | Shareable link plus a pasteable message |
-| `GET /api/openapi.json` | OpenAPI 3.1 description of the above |
+| `POST /api/items` | Add items |
+| `POST /api/items/check` | Mark bought, or clear the mark. `all=true` resets |
+| `POST /api/items/update` | Change one item's name, note or mark |
+| `POST /api/items/remove` | Delete items |
+| `POST /api/items/move` | Move an item between categories, or reorder it |
+| `POST /api/reset` | `mode=untick` keeps rows, `mode=remove` needs `confirm=true` |
+| `POST /api/categories` | Add a category, optionally with items |
+| `POST /api/categories/update` | Rename a category or change its aisle hint |
+| `POST /api/categories/remove` | Remove a category, `confirm=true` if it holds items |
+| `POST /api/categories/move` | Reorder categories to match the walk through the shop |
+| `POST /api/lists` | Create a list |
+| `POST /api/list/rename` | Rename a list |
+| `POST /api/list/delete` | Delete a list, `confirm=true` and no default id |
+| `GET /api/openapi.json` | OpenAPI 3.1 description of all of the above |
 
-Only the operations worth having on a phone are exposed. MCP remains the full sixteen-tool
-interface; a sprawling OpenAPI document makes an assistant worse at choosing, not better.
+Every MCP tool has a route, so the two interfaces are at parity. A test asserts that, by
+listing the tools and checking each one is routed, because a surface that silently lacks an
+operation is worse than one that never had it: a model reports it cannot do something and the
+reason is invisible.
+
+Two constraints shaped the schema. It contains no `oneOf`, `anyOf` or `allOf`, since GPT Actions
+do not fully support them and a union in a request body can leave a model unable to build a
+valid call at all. And `items` is described as objects even though the server also accepts bare
+strings, because a Shortcut can only send an array of text while a schema has to pick one shape.
 
 ```bash
 BASE=https://shopping-list-mcp.gavrielgr.workers.dev
