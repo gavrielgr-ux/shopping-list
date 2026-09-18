@@ -160,6 +160,12 @@ It runs on Cloudflare's **free tier with no credit card**. Two choices keep it t
   instead. `shopping_list_lists` then reports the default list rather than a remembered set,
   which is the fallback it already documents.
 
+### Already deployed
+
+**<https://shopping-list-mcp.gavrielgr.workers.dev>**, via the Cloudflare dashboard's Git
+integration, so every push to `main` redeploys it. The steps below are how that was set up, and
+what to repeat for a fresh deployment.
+
 ### Deploy from a phone, with no terminal
 
 Everything below happens in the Cloudflare dashboard in a mobile browser. Cloudflare Workers
@@ -266,12 +272,25 @@ Only the operations worth having on a phone are exposed. MCP remains the full si
 interface; a sprawling OpenAPI document makes an assistant worse at choosing, not better.
 
 ```bash
-curl -H "Authorization: Bearer $TOKEN" "https://…workers.dev/api/list?pending_only=true"
+BASE=https://shopping-list-mcp.gavrielgr.workers.dev
+
+curl -H "Authorization: Bearer $TOKEN" "$BASE/api/list?pending_only=true"
 
 curl -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d '{"items":["חלב","ביצים"],"category":"חלב וביצים"}' \
-  "https://…workers.dev/api/items"
+  "$BASE/api/items"
 ```
+
+The token can also ride in the path, which is how to check something from a phone browser where
+there is nowhere to put a header:
+
+```
+https://shopping-list-mcp.gavrielgr.workers.dev/<token>/api/list?pending_only=true
+```
+
+Bear in mind that a URL carrying a token lands in browser history and possibly in browser sync,
+so prefer the header form for anything permanent. Rotating the token is just editing the secret
+in the Cloudflare dashboard.
 
 ### Siri, via an iOS Shortcut
 
