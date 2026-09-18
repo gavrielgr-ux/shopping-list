@@ -22,6 +22,7 @@ mobile app** and **Cowork**. They have no computer at all: a phone is the only d
 | `mcp-server/` | TypeScript MCP server, 16 tools, 97 tests |
 | `mcp-server/src/index.ts` | stdio entry point |
 | `mcp-server/src/worker.ts` | Cloudflare Worker entry point (HTTPS) |
+| `mcp-server/src/rest.ts` | Plain REST + OpenAPI façade over the same tools, under `/api/` |
 | `mcp-server/wrangler.toml` | Worker deploy config, self-building |
 | `.mcp.json` | Registers the stdio server for Claude Code, via `mcp-server/bin/launch.sh` |
 | `.claude/hooks/session-start.sh` | Installs and builds `mcp-server/` before a remote session starts |
@@ -126,6 +127,20 @@ family shopping list arguably belongs there rather than in an employer's Claude 
    either place.
 
 Details in `mcp-server/README.md`.
+
+### B2. Skip assistants entirely: Siri, or a ChatGPT action
+
+The Worker serves a REST API under `/api/` with an OpenAPI document, behind the same token. That
+reaches the goal without any connector at all:
+
+- An **iOS Shortcut** posting to `/api/items`, triggered by Siri. No AI subscription, no org
+  permission, and each family member installs it once. For adding an item while standing in a
+  shop this is better than any assistant route.
+- A **ChatGPT custom action**, importing `/api/openapi.json`. Shareable by GPT link.
+
+Note that every assistant route requires per-person setup on that person's own account. There is
+no mechanism in any of them for sharing your access. So for family sharing, the web page plus a
+Shortcut is structurally simpler than any AI integration.
 
 ### C. Ask the work org's Claude Owner to add it
 

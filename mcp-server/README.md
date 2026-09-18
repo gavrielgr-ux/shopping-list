@@ -241,6 +241,67 @@ than byte by byte, so the comparison does not short-circuit on the first wrong c
 This matters more than it looks: without it, a public URL would let anyone who found it read and
 rewrite every list.
 
+## The HTTP API, for things that cannot speak MCP
+
+The Worker also serves a plain REST interface under `/api/`, behind the same access token. It
+exists because most things that can call an API cannot speak MCP: a ChatGPT custom action, an
+iOS Shortcut driven by Siri, a cron job, `curl`.
+
+It is a thin adapter, not a second implementation. Each route calls the corresponding MCP tool
+in-process, so matching, confirmation guards and compare-and-swap writes are the tools' own and
+the two interfaces cannot drift apart. A test asserts that a write through REST is visible
+through MCP.
+
+| Route | Does |
+| --- | --- |
+| `GET /api/list` | Read the list. `?pending_only=true`, `?category=`, `?list_id=` |
+| `POST /api/items` | Add items. `items` accepts plain strings or objects with `note`/`category` |
+| `POST /api/items/check` | Tick off or un-tick. `checked=false` to clear, `all=true` to reset |
+| `POST /api/items/remove` | Delete rows |
+| `POST /api/reset` | `mode=untick` keeps rows, `mode=remove` needs `confirm=true` |
+| `GET /api/link` | Shareable link plus a pasteable message |
+| `GET /api/openapi.json` | OpenAPI 3.1 description of the above |
+
+Only the operations worth having on a phone are exposed. MCP remains the full sixteen-tool
+interface; a sprawling OpenAPI document makes an assistant worse at choosing, not better.
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" "https://…workers.dev/api/list?pending_only=true"
+
+curl -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"items":["חלב","ביצים"],"category":"חלב וביצים"}' \
+  "https://…workers.dev/api/items"
+```
+
+### Siri, via an iOS Shortcut
+
+This needs no AI subscription, no connector and no organisation permission, and it is the
+fastest route while actually standing in a shop. Each family member installs it once.
+
+1. Shortcuts → new shortcut → add **Dictate Text**.
+2. Add **Get Contents of URL**:
+   - URL `https://<your-worker>.workers.dev/api/items`
+   - Method **POST**
+   - Header `Authorization` = `Bearer <your token>`
+   - Request Body **JSON**, with a field `items` of type Array containing the Dictated Text, and
+     a field `category` set to whichever category you want new items to land in.
+3. Name it something Siri can hear, such as "add to shopping list".
+
+Ticking things off works the same way against `/api/items/check`.
+
+### A ChatGPT custom action
+
+1. Create a GPT, then Configure → **Actions**.
+2. Paste the contents of `GET /api/openapi.json`. Fetch it in a browser using the secret-path
+   form of the URL, `https://…workers.dev/<token>/api/openapi.json`, and copy what it returns.
+   The document's `servers` entry keeps whatever path prefix you fetched it through, so the URL
+   it gives is one that works.
+3. Authentication → **API Key**, type **Bearer**, and paste the token. Then the `servers` URL can
+   be the plain origin instead.
+
+Anyone you share the GPT with can edit the list, which for a household list is the point. Treat
+it as you would the `?list=` link.
+
 ## Tools
 
 Every tool is prefixed `shopping_`, takes an optional `list_id` (defaulting to
