@@ -1,0 +1,25 @@
+# Cloudflare Worker deployment for the shopping-list MCP server.
+#
+# Two ways to deploy, both documented in README.md:
+#
+#  - Cloudflare Workers Builds, which watches this repository and deploys on push. Set up
+#    entirely in the Cloudflare dashboard, so it needs no terminal. Point it at the
+#    "mcp-server" root directory; the build command below does the rest.
+#  - `npx wrangler deploy` from a checkout.
+#
+# nodejs_compat is required: the server uses node:crypto and reads process.env.
+name = "shopping-list-mcp"
+main = "dist/src/worker.js"
+compatibility_date = "2026-09-01"
+compatibility_flags = ["nodejs_compat"]
+
+# No Durable Objects, no KV and no queues: the transport runs stateless, which keeps this
+# deployment inside the free tier.
+
+# Run before every deploy, so a build from the dashboard needs no extra configuration and a
+# deploy can never ship a stale dist/ (which is not committed).
+[build]
+command = "npm install --no-audit --no-fund && npm run build"
+
+[observability]
+enabled = true

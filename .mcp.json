@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "shopping-list": {
+      "command": "sh",
+      "args": ["mcp-server/bin/launch.sh"]
+    }
+  }
+}
