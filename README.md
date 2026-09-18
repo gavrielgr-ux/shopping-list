@@ -15,6 +15,7 @@ everyone holding its link.
 | `mcp-server/` | MCP server letting an AI assistant read and edit the lists — see its [README](mcp-server/README.md) |
 | `.mcp.json` | Registers that server for Claude Code when this repo is opened |
 | `.claude/hooks/` | SessionStart hook that builds the server before a web session starts |
+| `HANDOFF.md` | Context for a fresh AI session continuing the connector setup |
 
 The site is static, with no build step: GitHub Pages serves the repository root, and `app.js`
 loads the Firebase SDK straight from `gstatic.com`. Lists live in a Firebase Realtime Database
