@@ -200,6 +200,37 @@ npx wrangler secret put SHOPPING_LIST_ACCESS_TOKEN   # paste it when prompted
 npm run worker:deploy
 ```
 
+### Add it as a custom connector, which the mobile app cannot do
+
+A connector cannot be **added** from the Claude iOS or Android app. Adding one is a claude.ai
+web action, and the apps only *use* connectors that already exist on the account. A phone is
+still enough, because the browser works.
+
+Wrangler, or the dashboard, prints a URL like
+`https://shopping-list-mcp.<your-subdomain>.workers.dev`. The MCP endpoint is `/mcp`, and the
+token can travel two ways:
+
+| Where the token goes | URL to register |
+| --- | --- |
+| `Authorization: Bearer <token>` header | `https://…workers.dev/mcp` |
+| A secret path segment | `https://…workers.dev/<token>/mcp` |
+
+Use the header if the connector dialog lets you add one. Use the path form if it only accepts a
+URL: that is the same "unguessable URL" protection the shopping lists already rely on, since
+anyone holding a `?list=` link can edit that list.
+
+Then:
+
+1. Open <https://claude.ai/settings/connectors?modal=add-custom-connector> in a browser, not the
+   app. Failing that, go to Settings → Connectors (Customize → Connectors on Pro/Max) and press
+   **+**, then **Add custom connector**. Turn on the browser's "Request desktop site" if the
+   mobile layout hides the control.
+2. Give it the URL from the table above.
+3. Sign in to the mobile app again. A newly added connector appears on the next login, and in
+   Cowork, since an authorised connector stays live across chat, Projects and Cowork.
+
+Custom connectors are available on every plan, though a Free plan is limited to one.
+
 ### It fails closed
 
 With no `SHOPPING_LIST_ACCESS_TOKEN` set, the Worker serves nothing and returns `503` explaining
