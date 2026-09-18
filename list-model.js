@@ -14,10 +14,17 @@ export function createListId(uuid = () => crypto.randomUUID()) {
 
 export function normalizePayload(value, fallbackName = DEFAULT_LIST_NAME) {
   if (Array.isArray(value)) return { name: fallbackName, departments: value };
-  if (value && Array.isArray(value.departments)) {
+  // A list with no categories is stored without a `departments` key at all, because the
+  // Realtime Database deletes a key whose value is an empty array. Such a payload is still a
+  // real list: treating it as unreadable made every other open tab silently ignore the change
+  // and then save its own stale categories back over it.
+  const hasDepartments = Boolean(value) && Array.isArray(value.departments);
+  const isEmptyList = Boolean(value) && typeof value === 'object' && !hasDepartments
+    && value.departments === undefined && typeof value.name === 'string';
+  if (hasDepartments || isEmptyList) {
     const payload = {
       name: String(value.name || fallbackName).trim() || fallbackName,
-      departments: value.departments
+      departments: hasDepartments ? value.departments : []
     };
     if (Number.isFinite(value.updatedAt)) payload.updatedAt = value.updatedAt;
     return payload;

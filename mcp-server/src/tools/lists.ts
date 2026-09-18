@@ -2,7 +2,7 @@ import { z } from "zod";
 import { DEFAULT_LIST_ID, DEFAULT_LIST_NAME, LISTS_ROOT } from "../constants.js";
 import { buildView, renderList, renderSummary, reply } from "../format.js";
 import { normalizePayload, progressOf } from "../normalize.js";
-import { readNode, shallowKeys } from "../rtdb.js";
+import { NetworkBlocked, readNode, shallowKeys } from "../rtdb.js";
 import { listIdField, listViewShape, mutationShape, responseFormatField } from "../schemas.js";
 import { forgetList, knownLists, rememberList } from "../state.js";
 import {
@@ -97,6 +97,8 @@ Examples:
     },
     guard(async ({ include_progress, response_format }) => {
       const registry = await knownLists();
+      // A NetworkBlocked here is deliberately not caught: reporting a total egress block as
+      // "the rules do not allow enumeration" would send the reader to the wrong place.
       const discovered = await shallowKeys(LISTS_ROOT);
       const ids = new Set<string>([DEFAULT_LIST_ID, ...registry.map(entry => entry.id), ...(discovered ?? [])]);
 
@@ -109,7 +111,8 @@ Examples:
             is_default: id === DEFAULT_LIST_ID
           };
           if (!include_progress) {
-            return { ...base, name: fallbackName, progress: null, reachable: true };
+            // Nothing was read, so whether the list exists is genuinely unknown.
+            return { ...base, name: fallbackName, progress: null, reachable: null };
           }
           try {
             const loaded = await loadList(id);
@@ -120,7 +123,10 @@ Examples:
               progress: progressOf(loaded.payload),
               reachable: true
             };
-          } catch {
+          } catch (error) {
+            // A network block affects every list and is not something to report per row: let it
+            // escape so the tool reports the real cause once.
+            if (error instanceof NetworkBlocked) throw error;
             // A deleted or rule-blocked list is reported as unreachable rather than failing the call.
             return { ...base, name: fallbackName, progress: null, reachable: false };
           }
@@ -159,7 +165,7 @@ Examples:
       title: "Read a shopping list",
       description: `Read a shopping list: its categories, rows, notes, tick marks and progress.
 
-Indices in the output are stable selectors: "[2]" before a category is its category_index, and "[5]" before a row is its item_index. Placeholder rows the web page keeps for typing into are omitted.
+The "[2]" shown before a category is its category_index, accepted by the category tools. The "[5]" shown before a row is its position within that category, for reference only: the item tools select rows by name, not by index. Placeholder rows the web page keeps for typing into are omitted.
 
 Args:
   - list_id (string): list to read (default: the site's default list)

@@ -31,14 +31,36 @@ async function persist(next: PersistedState): Promise<void> {
   await rename(temporary, STATE_FILE);
 }
 
-/** Apply a change to the persisted state, one writer at a time. */
+/**
+ * Apply a change to the persisted state, one writer at a time.
+ *
+ * This never rejects. The state file is a local convenience holding a reusable anonymous
+ * identity and a list of ids already seen; nothing here is required for a database operation
+ * to have succeeded. An unwritable directory must therefore not turn a committed write into a
+ * reported failure, which would invite a retry of a non-idempotent edit. The problem is
+ * reported once on stderr instead, where it shows up as an MCP server log.
+ */
+let warnedAboutState = false;
+
 function update(change: (state: PersistedState) => PersistedState): Promise<void> {
   const run = queue.then(async () => {
-    const current = await load();
-    await persist(change({ ...current }));
+    try {
+      const current = await load();
+      await persist(change({ ...current }));
+    } catch (error) {
+      // Keep the in-memory copy, so the session still behaves as though it persisted.
+      if (!warnedAboutState) {
+        warnedAboutState = true;
+        process.stderr.write(
+          `shopping-list-mcp-server: cannot write ${STATE_FILE} ` +
+            `(${error instanceof Error ? error.message : String(error)}). Continuing without it: ` +
+            "a new anonymous identity will be created each run and shopping_list_lists will not " +
+            "remember lists between runs. Set SHOPPING_LIST_STATE_DIR to a writable directory to fix it.\n"
+        );
+      }
+    }
   });
-  // Keep the chain alive even if one update fails, so later writes still run.
-  queue = run.catch(() => undefined);
+  queue = run;
   return run;
 }
 

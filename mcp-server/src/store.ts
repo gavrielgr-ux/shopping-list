@@ -82,9 +82,22 @@ export interface MutationResult<T> {
   after: ListPayload;
   /** Whatever the mutator reported about what it changed. */
   detail: T;
+  /** False when the mutation turned out to be a no-op and nothing was sent. */
+  wrote: boolean;
   /** How many times the write had to be retried after losing a race. */
   retries: number;
 }
+
+/**
+ * The part of a serialized payload that represents content, ignoring the timestamp.
+ *
+ * Used to recognise a mutation that changed nothing, so it can be skipped. That matters beyond
+ * saving a request: the page re-renders by replacing the list's innerHTML whenever it adopts a
+ * remote update, which takes focus out of whatever row someone is typing in. A write that
+ * changes nothing but bumps `updatedAt` would do that for no reason.
+ */
+const contentOf = (body: Record<string, unknown>): string =>
+  JSON.stringify({ name: body.name, departments: body.departments });
 
 /**
  * Read a list, apply `mutate`, and write it back as a compare-and-swap.
@@ -107,6 +120,11 @@ export async function mutateList<T>(
     const detail = mutate(draft);
     const body = serializePayload(draft, loaded.payload.updatedAt);
 
+    if (contentOf(body) === contentOf(serializePayload(before, loaded.payload.updatedAt))) {
+      await rememberList(listId, before.name);
+      return { before, after: before, detail, retries: attempt, wrote: false };
+    }
+
     try {
       await writeNode(pathFor(listId), body, loaded.etag ?? ABSENT_ETAG);
     } catch (error) {
@@ -117,7 +135,7 @@ export async function mutateList<T>(
 
     const after = normalizePayload(body);
     await rememberList(listId, after.name);
-    return { before, after, detail, retries: attempt };
+    return { before, after, detail, retries: attempt, wrote: true };
   }
 
   throw new ToolError(

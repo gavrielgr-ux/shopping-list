@@ -70,10 +70,13 @@ const textOf = (result: CallResult): string =>
  * the parts the SDK owns: input coercion, default values, and validation of every
  * `structuredContent` against the tool's declared output schema.
  */
-export async function startHarness(options: FakeOptions = {}): Promise<Harness> {
+export async function startHarness(
+  options: FakeOptions & { stateDir?: string } = {}
+): Promise<Harness> {
   // constants.ts reads the environment once at import time, so the state directory has to be
   // redirected before the server module graph is loaded.
-  process.env.SHOPPING_LIST_STATE_DIR = mkdtempSync(join(tmpdir(), "shopping-list-mcp-test-"));
+  process.env.SHOPPING_LIST_STATE_DIR =
+    options.stateDir ?? mkdtempSync(join(tmpdir(), "shopping-list-mcp-test-"));
   const rtdb = installFakeRtdb(options);
 
   const { createServer } = await import("../src/server.js");

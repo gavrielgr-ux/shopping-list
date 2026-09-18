@@ -63,7 +63,7 @@ To work on it in a checkout of your own (Node.js 20 or newer):
 ```bash
 cd mcp-server
 npm install        # also builds, via the prepare script
-npm test           # 79 tests
+npm test           # 88 tests
 npm run doctor     # check authentication, database access and rules
 ```
 
@@ -227,6 +227,15 @@ browser and never edited here will not show up; address it by the `?list=` value
 on a non-empty category, and `shopping_clear_checked` with `mode: "remove"` all refuse unless
 `confirm: true`, and say what would be lost.
 
+**A mutation that changes nothing is not written.** The page re-renders by replacing the list's
+`innerHTML` whenever it adopts a remote update, which takes focus out of whatever row someone is
+typing in. Bumping `updatedAt` for a write that changed nothing would do that for no reason.
+
+**Local failures are never fatal.** The state file holding the reusable anonymous identity and
+the known-list registry is a convenience. If it cannot be written the server warns once on
+stderr and carries on, because reporting a failure after the database write has committed would
+invite a retry of an edit that is not idempotent.
+
 ## Configuration
 
 Everything has a working default; nothing needs setting for normal use.
@@ -262,8 +271,15 @@ npm test        # 73 tests
 The tests run the real server over an in-memory MCP transport against a fake Realtime Database
 that reproduces ETag compare-and-swap, empty-value pruning and the numeric-key array quirk. Because the calls go
 through an actual MCP client, they also check the SDK's own input coercion and validate every
-response against its declared output schema. Covered, among others: concurrent-edit retry,
-`updatedAt` monotonicity, token refresh after a `401`, ambiguous-name handling, telling a
-network block apart from a rules denial, and every confirmation guard.
+response against its declared output schema. Covered, among others: concurrent-edit retry, `updatedAt` monotonicity, token refresh after a
+`401`, ambiguous-name handling, telling a network block apart from a rules denial, a committed
+write surviving an unwritable local state file, no-op mutations not being written at all, and
+every confirmation guard.
+
+`test/app-contract.test.ts` imports the page's own `list-model.js` and asserts it can read what
+this server writes. That is not decoration: an empty list is stored without a `departments` key
+(the database deletes a key whose value is an empty array), and the page used to treat such a
+payload as unreadable, skip the update while still displaying "synced", then save its own stale
+categories back over it. The page now tolerates it, and this test fails if that regresses.
 
 Nothing in the suite touches the network or the real list.

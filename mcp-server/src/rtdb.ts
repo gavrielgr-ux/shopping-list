@@ -11,6 +11,27 @@ export interface ReadResult<T> {
   etag: string | null;
 }
 
+/**
+ * Raised when the database itself refused, i.e. its security rules did.
+ *
+ * Distinct from a refusal by something in between, because the two are fixed in different
+ * places and a caller that treats them alike will send the reader to the wrong console.
+ */
+export class RulesDenied extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RulesDenied";
+  }
+}
+
+/** Raised when a proxy, firewall or egress policy refused before the database was reached. */
+export class NetworkBlocked extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "NetworkBlocked";
+  }
+}
+
 /** Raised when a conditional write lost a race with another writer. */
 export class PreconditionFailed extends Error {
   constructor(readonly currentEtag: string | null) {
@@ -53,7 +74,7 @@ function describe(error: HttpError): Error {
     if (!isFirebaseRefusal(error.body)) {
       // Relay the intermediary's own words: they usually name the exact remedy.
       const upstream = error.body.trim().slice(0, 300);
-      return new Error(
+      return new NetworkBlocked(
         `A network policy between this machine and the database refused the request (HTTP ${error.status})` +
           `${upstream ? `: ${upstream}` : "."} ` +
           `Nothing is wrong with the list or with Firebase — the host ${databaseHost()} has to be ` +
@@ -61,9 +82,9 @@ function describe(error: HttpError): Error {
           "environment's network egress allowlist; elsewhere, allow it in the proxy or firewall."
       );
     }
-    return new Error(
+    return new RulesDenied(
       `The Realtime Database refused access (HTTP ${error.status}): ${error.body.trim().slice(0, 200)}. ` +
-        "The security rules most likely do not grant this identity read/write on the list path — check " +
+        "The security rules most likely do not grant this identity read/write on the list path. Check " +
         "them in the Firebase console, or set SHOPPING_LIST_DB_SECRET to authenticate as an admin."
     );
   }
@@ -144,9 +165,11 @@ export async function writeNode(path: string, value: unknown, etag: string | nul
 /**
  * List the child keys of a node without downloading their contents.
  *
- * Whether this succeeds depends entirely on the database rules: the web app never reads the
- * collection root, so the rules may well grant read only on an individual list. Callers must
- * treat a rejection as "cannot enumerate", not as an error.
+ * Returns null when the database's own rules forbid the read, which is an expected outcome:
+ * the web app never reads the collection root, so the rules may well grant read only on an
+ * individual list. Anything else is rethrown. Swallowing a network failure here would report
+ * it as "the rules do not allow enumeration", which is the misdiagnosis this module exists to
+ * avoid.
  */
 export async function shallowKeys(path: string): Promise<string[] | null> {
   try {
@@ -158,7 +181,8 @@ export async function shallowKeys(path: string): Promise<string[] | null> {
     if (!text || text === "null") return [];
     const parsed = JSON.parse(text) as unknown;
     return parsed && typeof parsed === "object" ? Object.keys(parsed as Record<string, unknown>) : [];
-  } catch {
-    return null;
+  } catch (error) {
+    if (error instanceof RulesDenied) return null;
+    throw error;
   }
 }

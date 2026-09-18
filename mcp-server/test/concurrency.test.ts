@@ -139,3 +139,57 @@ test("a rules denial is reported as a Firebase permissions problem", async () =>
     await harness.close();
   }
 });
+
+test("a mutation that changes nothing is not written at all", async () => {
+  const harness = await startHarness({ data: { [LIST_PATH]: seedList() } });
+  try {
+    // "חלב" is already unticked, so unticking it is a no-op. Writing anyway would bump
+    // updatedAt, and every open tab replaces the list's innerHTML when it adopts an update,
+    // taking focus out of whatever row someone is mid-way through typing.
+    const before = harness.stored()?.updatedAt;
+    const result = await harness.data<{ changed: string[] }>("shopping_set_checked", {
+      items: ["חלב"],
+      checked: false
+    });
+    assert.ok(result.changed.some(line => line.includes("already")));
+    assert.equal(harness.rtdb.requests.filter(entry => entry.method === "PUT").length, 0);
+    assert.equal(harness.stored()?.updatedAt, before);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("a real change is still written when bundled with a no-op", async () => {
+  const harness = await startHarness({ data: { [LIST_PATH]: seedList() } });
+  try {
+    await harness.text("shopping_set_checked", { items: ["חלב", "תפוח עץ"] });
+    assert.equal(harness.rtdb.requests.filter(entry => entry.method === "PUT").length, 1);
+    assert.equal(categoriesOf(harness.stored())[1]?.items[0]?.checked, true);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("list_lists reports a total egress block instead of blaming the database rules", async () => {
+  const harness = await startHarness({ data: { [LIST_PATH]: seedList() }, blockedByProxy: true });
+  try {
+    const message = await harness.error("shopping_list_lists");
+    assert.match(message, /network policy/);
+    assert.doesNotMatch(message, /did not allow enumerating/);
+    assert.doesNotMatch(message, /security rules/);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("list_lists still falls back gracefully when only the rules forbid enumeration", async () => {
+  const harness = await startHarness({ data: { [LIST_PATH]: seedList() }, blockEnumeration: true });
+  try {
+    const result = await harness.data<{ enumeration_allowed: boolean }>("shopping_list_lists", {
+      response_format: "json"
+    });
+    assert.equal(result.enumeration_allowed, false);
+  } finally {
+    await harness.close();
+  }
+});

@@ -64,7 +64,14 @@ Error handling:
           .array(
             z.object({
               name: z.string().trim().min(1).max(200).describe("Product name, e.g. 'חלב'."),
-              note: z.string().trim().max(200).default("").describe("Quantity or note, e.g. '2 יחידות'."),
+              note: z
+                .string()
+                .trim()
+                .max(200)
+                .optional()
+                .describe(
+                  "Quantity or note, e.g. '2 יחידות'. With on_duplicate='update_note', an empty string clears an existing note, while omitting it leaves the note alone."
+                ),
               checked: z.boolean().default(false).describe("Whether it starts ticked off."),
               category: z
                 .string()
@@ -144,18 +151,23 @@ Error handling:
 
           if (existing.length) {
             const row = target.items[existing[0]!.index]!;
-            if (on_duplicate === "update_note" && item.note && item.note !== row.note) {
-              changes.push(`"${row.name}" already in "${target.title}" — note updated to "${item.note}"`);
+            // An explicit empty note clears; an omitted one leaves the existing note alone.
+            if (on_duplicate === "update_note" && item.note !== undefined && item.note !== row.note) {
+              changes.push(
+                item.note
+                  ? `"${row.name}" already in "${target.title}", note updated to "${item.note}"`
+                  : `"${row.name}" already in "${target.title}", note cleared`
+              );
               row.note = item.note;
               row.blank = false;
             } else {
-              changes.push(`"${row.name}" already in "${target.title}" — left as it was`);
+              changes.push(`"${row.name}" already in "${target.title}", left as it was`);
             }
             continue;
           }
 
           stripTrailingBlanks(target);
-          target.items.push(newRow(item.name, item.note, item.checked));
+          target.items.push(newRow(item.name, item.note ?? "", item.checked));
           changes.push(
             `added "${item.name}"${item.note ? ` (${item.note})` : ""} to "${target.title}"`
           );

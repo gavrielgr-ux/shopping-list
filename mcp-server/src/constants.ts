@@ -66,5 +66,13 @@ export const CHARACTER_LIMIT = 40_000;
 /** How many times a conditional write is retried when it loses a race. */
 export const WRITE_RETRIES = 4;
 
-/** Network timeout for a single HTTP request, in milliseconds. */
-export const REQUEST_TIMEOUT_MS = Number(env("SHOPPING_LIST_TIMEOUT_MS") ?? 15_000);
+/**
+ * Network timeout for a single HTTP request, in milliseconds.
+ *
+ * A bad value falls back to the default rather than becoming NaN, which would abort every
+ * request immediately and report a timeout "after NaNms".
+ */
+export const REQUEST_TIMEOUT_MS = (() => {
+  const configured = Number(env("SHOPPING_LIST_TIMEOUT_MS"));
+  return Number.isFinite(configured) && configured > 0 ? configured : 15_000;
+})();
