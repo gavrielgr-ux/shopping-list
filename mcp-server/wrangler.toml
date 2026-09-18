@@ -1,0 +1,17 @@
+# Cloudflare Worker deployment for the shopping-list MCP server.
+#
+# Deploy with:
+#   npx wrangler secret put SHOPPING_LIST_ACCESS_TOKEN
+#   npx wrangler deploy
+#
+# nodejs_compat is required: the server uses node:crypto and reads process.env.
+name = "shopping-list-mcp"
+main = "dist/src/worker.js"
+compatibility_date = "2026-09-01"
+compatibility_flags = ["nodejs_compat"]
+
+# No Durable Objects, no KV and no queues: the transport runs stateless, which keeps this
+# deployment inside the free tier.
+
+[observability]
+enabled = true

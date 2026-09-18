@@ -79,6 +79,9 @@ export async function startHarness(
     options.stateDir ?? mkdtempSync(join(tmpdir(), "shopping-list-mcp-test-"));
   const rtdb = installFakeRtdb(options);
 
+  const { useStateBackend } = await import("../src/state.js");
+  const { fileBackend } = await import("../src/state-file.js");
+  useStateBackend(fileBackend);
   const { createServer } = await import("../src/server.js");
   const server = createServer();
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();

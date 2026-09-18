@@ -19,7 +19,10 @@
     "test": "npm run build && node --test \"dist/test/*.test.js\"",
     "typecheck": "tsc --noEmit",
     "inspect": "npm run build && npx @modelcontextprotocol/inspector node dist/src/index.js",
-    "doctor": "npm run build && node dist/src/doctor.js"
+    "doctor": "npm run build && node dist/src/doctor.js",
+    "worker:dev": "npm run build && wrangler dev",
+    "worker:deploy": "npm run build && wrangler deploy",
+    "worker:token": "node -e \"console.log(require('node:crypto').randomBytes(32).toString('base64url'))\""
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
@@ -27,6 +30,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "wrangler": "^4.134.0"
   }
 }

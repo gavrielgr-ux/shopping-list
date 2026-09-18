@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { createServer } from "./server.js";
+import { fileBackend } from "./state-file.js";
+import { useStateBackend } from "./state.js";
 
 /**
  * stdio entry point.
@@ -9,6 +11,8 @@ import { createServer } from "./server.js";
  * log line would corrupt the protocol. Diagnostics go to stderr.
  */
 async function main(): Promise<void> {
+  // This build has a filesystem, so reuse one anonymous identity across restarts.
+  useStateBackend(fileBackend);
   const server = createServer();
   const transport = new StdioServerTransport();
   await server.connect(transport);

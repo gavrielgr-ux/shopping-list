@@ -1,9 +1,54 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
-import { STATE_DIR } from "./constants.js";
 import type { PersistedState, RegistryEntry } from "./types.js";
 
-const STATE_FILE = join(STATE_DIR, "state.json");
+/**
+ * Where the persisted state is kept.
+ *
+ * Abstracted because the two deployments differ: the Node build writes a file, while the
+ * Cloudflare Worker has no filesystem. Keeping the storage behind this interface means only the
+ * entry point differs, and nothing that imports this module has to care. The filesystem
+ * implementation lives in `state-file.ts`, which is the one module importing `node:fs`, so a
+ * bundle that never pulls in that entry point never pulls in `node:fs` either.
+ */
+export interface StateBackend {
+  read(): Promise<string | null>;
+  write(text: string): Promise<void>;
+  /** Human-readable location, for diagnostics. */
+  describe(): string;
+}
+
+/**
+ * Default backend: remembers state for the life of the process and no longer.
+ *
+ * Safe everywhere, and the right behaviour for a serverless deployment that authenticates with
+ * a stored credential and so has no anonymous identity worth caching.
+ */
+const memoryBackend = (): StateBackend => {
+  let held: string | null = null;
+  return {
+    async read() {
+      return held;
+    },
+    async write(text) {
+      held = text;
+    },
+    describe() {
+      return "(in memory only, nothing written to disk)";
+    }
+  };
+};
+
+let backend: StateBackend = memoryBackend();
+
+/** Install a storage backend. Called by an entry point before any tool runs. */
+export function useStateBackend(next: StateBackend): void {
+  backend = next;
+  cache = null;
+}
+
+/** Where state is being kept, for diagnostics. */
+export function stateLocation(): string {
+  return backend.describe();
+}
 
 let cache: PersistedState | null = null;
 /** Serializes writes so two concurrent tool calls cannot clobber each other's state. */
@@ -12,51 +57,44 @@ let queue: Promise<void> = Promise.resolve();
 async function load(): Promise<PersistedState> {
   if (cache) return cache;
   try {
-    const raw = await readFile(STATE_FILE, "utf8");
-    const parsed = JSON.parse(raw) as PersistedState;
+    const raw = await backend.read();
+    const parsed = raw ? (JSON.parse(raw) as PersistedState) : null;
     cache = parsed && typeof parsed === "object" ? parsed : {};
   } catch {
-    // A missing or corrupt state file is not an error: the identity is simply re-minted.
+    // Missing or corrupt state is not an error: the identity is simply re-minted.
     cache = {};
   }
   return cache;
 }
 
-async function persist(next: PersistedState): Promise<void> {
-  cache = next;
-  await mkdir(dirname(STATE_FILE), { recursive: true, mode: 0o700 });
-  // Write to a sibling then rename, so a crash mid-write cannot truncate the saved token.
-  const temporary = `${STATE_FILE}.${process.pid}.tmp`;
-  await writeFile(temporary, `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 });
-  await rename(temporary, STATE_FILE);
-}
-
 /**
  * Apply a change to the persisted state, one writer at a time.
  *
- * This never rejects. The state file is a local convenience holding a reusable anonymous
- * identity and a list of ids already seen; nothing here is required for a database operation
- * to have succeeded. An unwritable directory must therefore not turn a committed write into a
- * reported failure, which would invite a retry of a non-idempotent edit. The problem is
- * reported once on stderr instead, where it shows up as an MCP server log.
+ * This never rejects. The state is a local convenience holding a reusable anonymous identity
+ * and a list of ids already seen; nothing here is required for a database operation to have
+ * succeeded. An unwritable location must therefore not turn a committed write into a reported
+ * failure, which would invite a retry of a non-idempotent edit. The problem is reported once on
+ * stderr instead, where it shows up as an MCP server log.
  */
 let warnedAboutState = false;
 
 function update(change: (state: PersistedState) => PersistedState): Promise<void> {
   const run = queue.then(async () => {
+    const current = await load();
+    const next = change({ ...current });
+    cache = next;
     try {
-      const current = await load();
-      await persist(change({ ...current }));
+      await backend.write(`${JSON.stringify(next, null, 2)}\n`);
     } catch (error) {
-      // Keep the in-memory copy, so the session still behaves as though it persisted.
       if (!warnedAboutState) {
         warnedAboutState = true;
-        process.stderr.write(
-          `shopping-list-mcp-server: cannot write ${STATE_FILE} ` +
-            `(${error instanceof Error ? error.message : String(error)}). Continuing without it: ` +
-            "a new anonymous identity will be created each run and shopping_list_lists will not " +
-            "remember lists between runs. Set SHOPPING_LIST_STATE_DIR to a writable directory to fix it.\n"
-        );
+        const message =
+          `shopping-list-mcp-server: cannot persist state to ${backend.describe()} ` +
+          `(${error instanceof Error ? error.message : String(error)}). Continuing without it: ` +
+          "a new anonymous identity will be created each run and shopping_list_lists will not " +
+          "remember lists between runs. Set SHOPPING_LIST_STATE_DIR to a writable directory to fix it.\n";
+        if (typeof process !== "undefined" && process.stderr) process.stderr.write(message);
+        else console.error(message.trim());
       }
     }
   });
@@ -81,9 +119,8 @@ export async function clearIdentity(): Promise<void> {
 /**
  * Record a list this server has touched.
  *
- * The web app keeps its "recent lists" only in `localStorage`, and the database has no index
- * of lists, so without a local registry a freshly started server would have no way to name
- * any list but the default one.
+ * The web app keeps its "recent lists" only in `localStorage`, and the database has no index of
+ * lists, so without this a freshly started server could not name any list but the default one.
  */
 export async function rememberList(id: string, name: string): Promise<void> {
   const entry: RegistryEntry = { id, name, lastSeen: new Date().toISOString() };
@@ -104,5 +141,3 @@ export async function forgetList(id: string): Promise<void> {
 export async function knownLists(): Promise<RegistryEntry[]> {
   return [...((await load()).lists ?? [])];
 }
-
-export const stateFilePath = STATE_FILE;

@@ -11,13 +11,15 @@ import { DATABASE_URL, DEFAULT_LIST_ID, LISTS_ROOT, SITE_URL } from "./constants
 import { progressOf } from "./normalize.js";
 import { shallowKeys } from "./rtdb.js";
 import { loadList } from "./store.js";
-import { stateFilePath } from "./state.js";
+import { fileBackend, stateFilePath } from "./state-file.js";
+import { useStateBackend } from "./state.js";
 
 const line = (label: string, value: string): void => {
   process.stdout.write(`${label.padEnd(22)} ${value}\n`);
 };
 
 async function main(): Promise<void> {
+  useStateBackend(fileBackend);
   process.stdout.write("shopping-list-mcp-server doctor\n\n");
   line("site", SITE_URL);
   line("database", DATABASE_URL);

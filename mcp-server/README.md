@@ -63,7 +63,7 @@ To work on it in a checkout of your own (Node.js 20 or newer):
 ```bash
 cd mcp-server
 npm install        # also builds, via the prepare script
-npm test           # 88 tests
+npm test           # 97 tests
 npm run doctor     # check authentication, database access and rules
 ```
 
@@ -143,6 +143,64 @@ To poke at it by hand:
 ```bash
 npm run inspect     # opens the MCP Inspector
 ```
+
+## Use it from the Claude mobile app, Cowork and claude.ai
+
+Those surfaces do not run anything locally. Anthropic's servers connect outward to a URL, so the
+server has to be publicly reachable rather than a subprocess on a machine. `src/worker.ts` is
+that deployment: the same sixteen tools, served over HTTPS from a Cloudflare Worker.
+
+It runs on Cloudflare's **free tier with no credit card**. Two choices keep it there:
+
+- **Stateless transport.** No session id generator is passed, so each request is handled on its
+  own and no Durable Object is needed. That suits a tool server where every call is already an
+  independent read or compare-and-swap.
+- **No storage.** The state file that the Node build uses to cache an anonymous identity is
+  replaced by the in-memory default, because the Worker authenticates with a stored credential
+  instead. `shopping_list_lists` then reports the default list rather than a remembered set,
+  which is the fallback it already documents.
+
+### Deploy
+
+```bash
+cd mcp-server
+npm install
+npm run worker:token                        # generate a long random token, copy it
+npx wrangler secret put SHOPPING_LIST_ACCESS_TOKEN   # paste it when prompted
+npm run worker:deploy
+```
+
+Optionally also `npx wrangler secret put SHOPPING_LIST_DB_SECRET` to authenticate to Firebase
+with a stored credential rather than creating an anonymous user per cold start. Doing so also
+lets you tighten the database rules, since the Worker no longer needs anonymous write access.
+
+### Add it as a custom connector
+
+Wrangler prints a URL like `https://shopping-list-mcp.<your-subdomain>.workers.dev`. The MCP
+endpoint is `/mcp`, and the token can travel two ways:
+
+| Where the token goes | URL to give Claude |
+| --- | --- |
+| `Authorization: Bearer <token>` header | `https://…workers.dev/mcp` |
+| A secret path segment | `https://…workers.dev/<token>/mcp` |
+
+Use the header if the connector dialog lets you add one. Use the path form if it only accepts a
+URL: that is the same "unguessable URL" protection the shopping lists themselves already rely
+on, since anyone holding a `?list=` link can already edit that list.
+
+Add it under Settings → Connectors → Add custom connector. It then works in the Claude mobile
+app, in Cowork and on claude.ai. Custom connectors are available on every plan, though a Free
+plan is limited to one.
+
+### It fails closed
+
+With no `SHOPPING_LIST_ACCESS_TOKEN` set, the Worker serves nothing and returns `503` explaining
+how to set one. A wrong or missing token gets `401`. Only `/` answers unauthenticated, with a
+fixed string that reveals nothing about the configuration. Tokens are compared by digest rather
+than byte by byte, so the comparison does not short-circuit on the first wrong character.
+
+This matters more than it looks: without it, a public URL would let anyone who found it read and
+rewrite every list.
 
 ## Tools
 
@@ -282,4 +340,11 @@ this server writes. That is not decoration: an empty list is stored without a `d
 payload as unreadable, skip the update while still displaying "synced", then save its own stale
 categories back over it. The page now tolerates it, and this test fails if that regresses.
 
+`test/worker.test.ts` drives the Worker's `fetch` handler directly, covering the fail-closed
+default, a missing, wrong and prefix-of-correct token, both places a valid token may travel, and
+an authenticated request to an unknown path.
+
 Nothing in the suite touches the network or the real list.
+
+The Worker was additionally verified by running it under `wrangler dev` in `workerd`, Cloudflare's
+own runtime, completing an MCP handshake over HTTP and calling a tool that read the live database.
