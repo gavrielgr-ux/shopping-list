@@ -130,3 +130,109 @@ Only if the owner actually wants this on the work account.
   `support.claude.com`, `api.cloudflare.com`, `dash.cloudflare.com`.
 - Merging PR #1 is a prerequisite for the Cloudflare dashboard route, since Workers Builds
   deploys from the default branch.
+
+## Starting a fresh session
+
+Two prompts to paste, depending on the surface. Both assume this file is readable, so the new
+session is not briefed by hand.
+
+### Claude chat, or the mobile app
+
+A chat session cannot do the integration. It has no shell, no local MCP server and no generic
+HTTP tool, so it cannot touch the database. Its useful job is diagnosis, and walking the owner
+through dashboard screens one step at a time from a phone.
+
+```
+I need you to help me finish a setup from my phone. I have no computer.
+Read the context first, then guide me one step at a time.
+
+CONTEXT TO READ
+If you have a GitHub connector, read these from the private repo
+gavrielgr-ux/shopping-list on branch claude/shopping-list-mcp-server-qvddyz
+(not main; PR #1 is still open):
+  - HANDOFF.md          <- start here, it has the full state
+  - mcp-server/README.md
+
+If you do NOT have a GitHub connector, say so immediately and I will
+paste the contents instead. Do not guess at what the files contain.
+
+THE GOAL
+I have a Hebrew family shopping list at
+https://gavrielgr-ux.github.io/shopping-list/ backed by a Firebase
+Realtime Database. A finished, tested MCP server with 16 tools reads and
+writes that same database, so its edits appear live in the page. I want
+to use those tools by talking to you in the Claude mobile app.
+
+WHAT IS BLOCKING
+My Claude account is a work account. The "Allow custom connectors" org
+setting appears to be off, which is the Enterprise default, so I have no
+"Add custom connector" option at all. Only an org Owner can enable it.
+Separately, connectors cannot be added from the mobile app even when
+allowed; that is a browser action at claude.ai.
+
+WHAT YOU CANNOT DO, so please don't propose it
+You have no generic HTTP tool. Web fetch is read-only GETs of public
+pages, and the database requires authentication. So you cannot read or
+write my lists in this conversation, and no amount of custom
+instructions will change that. A connector is the only mechanism.
+Previous attempts already ruled out: instructing you to call the REST
+API, and using GitHub as the datastore instead of Firebase.
+
+WHAT I WANT FROM YOU
+1. First, tell me exactly which connectors and tools you have available
+   in this conversation. I genuinely don't know what my org allows.
+2. Confirm or correct my diagnosis above, using web search on current
+   Anthropic documentation rather than memory. Cite what you find.
+3. Then walk me through the most viable route from HANDOFF.md section
+   "Try these, in this order", which is likely B: a personal free Claude
+   account plus deploying the Cloudflare Worker from the Cloudflare
+   dashboard in my phone browser.
+
+HOW TO WORK WITH ME
+Give me ONE step at a time and wait. I will tell you what I actually see
+on screen, which may not match the docs. Menu labels change.
+Don't tell me what I want to hear. If my plan is wrong, say so and give
+me your recommendation. Never invent a menu path you haven't verified.
+One thing you must not do: do not ask me to paste any access token or
+API key into this chat. Anything secret I will set in a dashboard
+myself.
+```
+
+### Cowork, or Claude Code
+
+These can run commands, so they may be able to host the MCP server directly and skip connectors
+entirely. Test that first.
+
+```
+Read HANDOFF.md in the GitHub repo gavrielgr-ux/shopping-list, on the
+branch claude/shopping-list-mcp-server-qvddyz (it is not on main yet,
+PR #1 is still open). Use the GitHub connector. Also read
+mcp-server/README.md for detail.
+
+Goal: let me create and edit my family shopping lists by talking to you,
+from the Claude mobile app and from Cowork. I only have a phone, no
+computer. The MCP server is already written and tested. What is not
+solved is reaching its tools from a phone.
+
+Before anything else, tell me two things:
+
+1. Do you already have tools named shopping_* available in this session?
+   If yes, call shopping_get_list and show me what is on the list. That
+   would mean the problem is already solved and nothing else is needed.
+
+2. Can you run shell commands and clone a repository in this session?
+   If yes, say so, because that opens options the handoff describes.
+
+Then work section "Try these, in this order" in HANDOFF.md, starting at A.
+Tell me what you find before changing any code. Do not redesign the
+server and do not re-review it. The section listing what has been ruled
+out is there to stop you retrying dead ends, so read it first.
+
+Contradict me if my plan is wrong. Verify claims rather than assuming.
+```
+
+### Never put a secret in a prompt
+
+Neither prompt asks for the Worker's access token, and no future one should. A session will
+offer to "check" it; a credential pasted into a transcript stays there. The token is set in the
+Cloudflare dashboard by the owner and read by nobody else.
