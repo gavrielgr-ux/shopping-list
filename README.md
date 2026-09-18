@@ -48,18 +48,18 @@ fails with `HTTP 403`, and the hook warns about it at session start.
 ### From the Claude mobile app, Cowork or claude.ai
 
 Those surfaces connect outward to a URL rather than running anything locally, so the same tools
-are also deployable as a Cloudflare Worker, on the free tier with no credit card:
+are also deployable as a Cloudflare Worker, on the free tier with no credit card and **without a
+terminal**: Cloudflare Workers Builds imports this repository and deploys on push, all from the
+dashboard in a mobile browser.
 
-```bash
-cd mcp-server
-npm run worker:token                                 # generate an access token
-npx wrangler secret put SHOPPING_LIST_ACCESS_TOKEN   # paste it
-npm run worker:deploy
-```
+Point it at the `mcp-server` root directory, then add a `SHOPPING_LIST_ACCESS_TOKEN` secret.
+Until that secret exists the Worker serves nothing, since a public URL would otherwise let
+anyone who found it rewrite every list. Add the resulting `https://…workers.dev/mcp` URL under
+Settings → Connectors → Add custom connector, and it works in the mobile app, in Cowork and on
+claude.ai.
 
-Then add the printed `https://…workers.dev/mcp` URL under Settings → Connectors → Add custom
-connector. Without a token set the Worker deliberately serves nothing, since a public URL would
-otherwise let anyone who found it rewrite every list.
+Full steps, including the checkout-based alternative, are in
+[`mcp-server/README.md`](mcp-server/README.md).
 
 For the tool reference, the design notes and how to use it from Claude Desktop or a local
 checkout, see [`mcp-server/README.md`](mcp-server/README.md).

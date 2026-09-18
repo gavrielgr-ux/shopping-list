@@ -160,37 +160,45 @@ It runs on Cloudflare's **free tier with no credit card**. Two choices keep it t
   instead. `shopping_list_lists` then reports the default list rather than a remembered set,
   which is the fallback it already documents.
 
-### Deploy
+### Deploy from a phone, with no terminal
+
+Everything below happens in the Cloudflare dashboard in a mobile browser. Cloudflare Workers
+Builds watches the repository and deploys on push, so there is no command line at any point, and
+every later change to this server deploys itself.
+
+1. Create a free Cloudflare account. No card is required for the Workers free tier.
+2. **Workers & Pages → Create → Workers → Import a repository**, and authorise GitHub for
+   `gavrielgr-ux/shopping-list`.
+3. Set **root directory** to `mcp-server`. Leave the build and deploy commands at their
+   defaults: `wrangler.toml` already carries a `[build]` command that installs and compiles, so
+   nothing else needs filling in.
+4. Deploy. The Worker answers on `https://shopping-list-mcp.<your-subdomain>.workers.dev`, and
+   `GET /` should return `shopping-list-mcp-server`.
+5. **Settings → Variables and Secrets → Add**, type **Secret**, name
+   `SHOPPING_LIST_ACCESS_TOKEN`, value a long random string. A password manager will generate
+   one; 32 or more random characters is plenty. Save, which redeploys.
+
+Until step 5 the Worker returns `503` to everything and serves no data, which is deliberate.
+
+Keep that token out of any chat transcript, including a conversation with Claude. Setting it in
+the dashboard rather than pasting it anywhere is the reason this step is yours and not
+something to delegate.
+
+Optionally add a second secret, `SHOPPING_LIST_DB_SECRET`, to authenticate to Firebase with a
+stored credential instead of creating an anonymous user per cold start. That also lets you
+tighten the database rules, since the Worker would no longer need anonymous write access.
+
+### Deploy from a checkout
+
+If you do have a terminal:
 
 ```bash
 cd mcp-server
 npm install
-npm run worker:token                        # generate a long random token, copy it
+npm run worker:token                                 # generate a token, copy it
 npx wrangler secret put SHOPPING_LIST_ACCESS_TOKEN   # paste it when prompted
 npm run worker:deploy
 ```
-
-Optionally also `npx wrangler secret put SHOPPING_LIST_DB_SECRET` to authenticate to Firebase
-with a stored credential rather than creating an anonymous user per cold start. Doing so also
-lets you tighten the database rules, since the Worker no longer needs anonymous write access.
-
-### Add it as a custom connector
-
-Wrangler prints a URL like `https://shopping-list-mcp.<your-subdomain>.workers.dev`. The MCP
-endpoint is `/mcp`, and the token can travel two ways:
-
-| Where the token goes | URL to give Claude |
-| --- | --- |
-| `Authorization: Bearer <token>` header | `https://…workers.dev/mcp` |
-| A secret path segment | `https://…workers.dev/<token>/mcp` |
-
-Use the header if the connector dialog lets you add one. Use the path form if it only accepts a
-URL: that is the same "unguessable URL" protection the shopping lists themselves already rely
-on, since anyone holding a `?list=` link can already edit that list.
-
-Add it under Settings → Connectors → Add custom connector. It then works in the Claude mobile
-app, in Cowork and on claude.ai. Custom connectors are available on every plan, though a Free
-plan is limited to one.
 
 ### It fails closed
 
