@@ -49,6 +49,20 @@ project and is not a secret.
 `shopping_add_items`, `shopping_set_checked`, `shopping_update_item`, `shopping_remove_items`,
 `shopping_move_item`, `shopping_clear_checked`.
 
+## The Worker is deployed
+
+**<https://shopping-list-mcp.gavrielgr.workers.dev>**, on the owner's Cloudflare account, via the
+dashboard's Git integration. Every push to `main` redeploys it, so no command line is involved.
+
+Endpoints: `/mcp` for MCP clients, `/api/` for plain HTTP, `/api/openapi.json` for the schema.
+`GET /` is an unauthenticated health check and is the only route that answers without a token.
+
+The access token lives only in the Cloudflare dashboard as the secret
+`SHOPPING_LIST_ACCESS_TOKEN`. It is deliberately not recorded here, or anywhere in this
+repository, or in any chat transcript. Ask the owner if you need it; do not ask them to paste it
+into a conversation. To rotate it, change the secret in the dashboard and update whatever holds
+it, which is the Shortcut and any connector.
+
 ## What is already proven to work
 
 - **Claude Code on the web**, right now. The committed `.mcp.json` plus the SessionStart hook
@@ -56,7 +70,12 @@ project and is not a secret.
   and by full create/add/check/delete on a throwaway list.
 - **The Worker**, run under `wrangler dev` in `workerd`: MCP handshake over HTTP, `tools/list`
   returning all 16, and a tool call that read the live database.
-- 97 tests pass. `cd mcp-server && npm test`.
+- 113 tests pass. `cd mcp-server && npm test`.
+- **The deployed Worker reaches the database in production.** Verified end to end: `GET /` returns
+  200, every other route returns 401 without a token including `/api/openapi.json`, and the owner
+  confirmed that `/<token>/api/list` returns the real list as JSON from a phone browser.
+- **The REST interface works against the live database.** Verified in `workerd`: a full add, a
+  fuzzy-Hebrew tick-off and a read-back on a throwaway list, which was then deleted.
 - **The live page still works after the `list-model.js` change.** Rendered in headless Chromium
   against the deployed site: it synced from Firebase in about two seconds, showed the real list
   name, all 9 categories and 33/47 progress, matching what the MCP tools report, with no page
@@ -74,6 +93,8 @@ connector on that account.
 
 **2. Connectors cannot be added from the mobile app**, only used there. Adding one is a
 claude.ai browser action. A newly added connector appears in the app on the next login.
+
+Neither of these blocks the REST route in B2, which is why that is now the recommended path.
 
 **3. Ruled out, do not retry these:**
 
@@ -128,10 +149,10 @@ family shopping list arguably belongs there rather than in an employer's Claude 
 
 Details in `mcp-server/README.md`.
 
-### B2. Skip assistants entirely: Siri, or a ChatGPT action
+### B2. Skip assistants entirely: Siri, or a ChatGPT action — recommended
 
-The Worker serves a REST API under `/api/` with an OpenAPI document, behind the same token. That
-reaches the goal without any connector at all:
+The Worker is already deployed and working, so this needs no further infrastructure. It reaches
+the goal without any connector, and therefore without the org restriction below:
 
 - An **iOS Shortcut** posting to `/api/items`, triggered by Siri. No AI subscription, no org
   permission, and each family member installs it once. For adding an item while standing in a
