@@ -260,16 +260,33 @@ through MCP.
 
 | Route | Does |
 | --- | --- |
-| `GET /api/list` | Read the list. `?pending_only=true`, `?category=`, `?list_id=` |
-| `POST /api/items` | Add items. `items` accepts plain strings or objects with `note`/`category` |
-| `POST /api/items/check` | Tick off or un-tick. `checked=false` to clear, `all=true` to reset |
-| `POST /api/items/remove` | Delete rows |
-| `POST /api/reset` | `mode=untick` keeps rows, `mode=remove` needs `confirm=true` |
+| `GET /api/list` | Read a list. `?pending_only=`, `?category=`, `?list_id=` |
+| `GET /api/lists` | List the reachable lists |
 | `GET /api/link` | Shareable link plus a pasteable message |
-| `GET /api/openapi.json` | OpenAPI 3.1 description of the above |
+| `POST /api/items` | Add items |
+| `POST /api/items/check` | Mark bought, or clear the mark. `all=true` resets |
+| `POST /api/items/update` | Change one item's name, note or mark |
+| `POST /api/items/remove` | Delete items |
+| `POST /api/items/move` | Move an item between categories, or reorder it |
+| `POST /api/reset` | `mode=untick` keeps rows, `mode=remove` needs `confirm=true` |
+| `POST /api/categories` | Add a category, optionally with items |
+| `POST /api/categories/update` | Rename a category or change its aisle hint |
+| `POST /api/categories/remove` | Remove a category, `confirm=true` if it holds items |
+| `POST /api/categories/move` | Reorder categories to match the walk through the shop |
+| `POST /api/lists` | Create a list |
+| `POST /api/list/rename` | Rename a list |
+| `POST /api/list/delete` | Delete a list, `confirm=true` and no default id |
+| `GET /api/openapi.json` | OpenAPI 3.1 description of all of the above |
 
-Only the operations worth having on a phone are exposed. MCP remains the full sixteen-tool
-interface; a sprawling OpenAPI document makes an assistant worse at choosing, not better.
+Every MCP tool has a route, so the two interfaces are at parity. A test asserts that, by
+listing the tools and checking each one is routed, because a surface that silently lacks an
+operation is worse than one that never had it: a model reports it cannot do something and the
+reason is invisible.
+
+Two constraints shaped the schema. It contains no `oneOf`, `anyOf` or `allOf`, since GPT Actions
+do not fully support them and a union in a request body can leave a model unable to build a
+valid call at all. And `items` is described as objects even though the server also accepts bare
+strings, because a Shortcut can only send an array of text while a schema has to pick one shape.
 
 ```bash
 BASE=https://shopping-list-mcp.gavrielgr.workers.dev
@@ -292,34 +309,164 @@ Bear in mind that a URL carrying a token lands in browser history and possibly i
 so prefer the header form for anything permanent. Rotating the token is just editing the secret
 in the Cloudflare dashboard.
 
-### Siri, via an iOS Shortcut
+### Siri, via iOS Shortcuts
 
-This needs no AI subscription, no connector and no organisation permission, and it is the
-fastest route while actually standing in a shop. Each family member installs it once.
+No AI subscription, no connector, no organisation permission, and the fastest route while
+actually standing in a shop. Each family member installs the shortcuts once.
 
-1. Shortcuts → new shortcut → add **Dictate Text**.
-2. Add **Get Contents of URL**:
-   - URL `https://<your-worker>.workers.dev/api/items`
-   - Method **POST**
-   - Header `Authorization` = `Bearer <your token>`
-   - Request Body **JSON**, with a field `items` of type Array containing the Dictated Text, and
-     a field `category` set to whichever category you want new items to land in.
-3. Name it something Siri can hear, such as "add to shopping list".
+**What this is and is not.** A Shortcut is one fixed HTTP call, not an agent. It cannot reason
+about what you meant, so you build one small shortcut per task rather than one clever one. Four
+cover daily use. Anything structural, creating a list, renaming or reordering categories, moving
+items between them, stays on the MCP side, which means Claude Code.
 
-Ticking things off works the same way against `/api/items/check`.
+Everything below uses:
+
+- Base URL `https://shopping-list-mcp.gavrielgr.workers.dev`
+- A header, on every shortcut: `Authorization` = `Bearer <your token>`
+
+Name each shortcut as the phrase you want to say, in whatever language your Siri is set to,
+because iOS runs a shortcut by its name.
+
+#### 1. Add items
+
+The one you will use most. It handles several items in one breath by splitting on commas.
+
+1. Shortcuts → **+** → Add Action → **Dictate Text**.
+2. Add Action → **Split Text**. Set *Text* to the Dictated Text variable, and *Separator* to
+   **Custom**, `, ` (comma and space). This turns "חלב, ביצים, לחם" into three items instead of
+   one long one.
+3. Add Action → **Get Contents of URL**:
+   - URL: `https://shopping-list-mcp.gavrielgr.workers.dev/api/items`
+   - Expand **Show More**
+   - Method: **POST**
+   - Headers: add `Authorization` with value `Bearer <your token>`
+   - Request Body: **JSON**
+   - Add field `items`, change its type to **Array**, and put the **Split Text** variable inside
+   - Add field `category`, type **Text**, set to the category new items should land in, for
+     example `מזווה ורטבים`
+4. Rename the shortcut to what you want to say, such as **"הוסף לרשימת קניות"**.
+
+A note on `category`: the list has nine categories, so the API needs to know which one, and a
+single shortcut can only carry a fixed answer. Two ways to live with that. Either point it at a
+sensible catch-all and re-file later from Claude Code, or name a category that does not exist
+yet, such as `להוסיף`, which gets created on first use and acts as an inbox. If you want
+per-aisle precision instead, duplicate the shortcut per category and name each one accordingly,
+for example "הוסף לפירות וירקות".
+
+#### 2. Tick items off
+
+This one needs no category, because names are searched across the whole list.
+
+Same as above, but the URL is `/api/items/check` and the JSON body has only the `items` array.
+Name it **"קניתי"**.
+
+Matching is loose and ignores Hebrew niqqud, so saying "חלב" ticks off "חלב 3%". If a name
+matches several rows the API refuses to guess and says so, which brings us to the next one.
+
+#### 3. What is left to buy
+
+1. **Get Contents of URL**, method **GET**:
+   `https://shopping-list-mcp.gavrielgr.workers.dev/api/link?include_items=true&include_progress=true`
+   with the same `Authorization` header.
+2. Add Action → **Get Dictionary Value**, key `message`.
+3. Add Action → **Show Result**, or **Speak Text** if you want it read aloud.
+
+The `message` field is already formatted for a human, grouped by category, which is why this
+reads better than parsing `/api/list`.
+
+#### 4. Reset for next week
+
+**Get Contents of URL**, **POST** to `/api/reset`, same header, Request Body **JSON** with one
+field `mode` set to `untick`. That clears every tick and keeps the rows. Name it
+**"אפס את רשימת הקניות"**.
+
+There is deliberately no shortcut for `mode=remove`, which deletes bought rows and requires
+`confirm=true`. A voice command is the wrong place for something irreversible.
+
+#### Seeing whether it worked
+
+Every mutating response contains a `changed` array naming exactly what happened, including items
+that were skipped as ambiguous or not found. Add **Get Dictionary Value** for `changed` followed
+by **Show Result** while you are setting a shortcut up; remove it once you trust it.
+
+#### Sharing with family
+
+Shortcuts are shareable, but the token travels inside them, so whoever holds the shortcut can
+edit the list. That is the intent for a household, and it is the same exposure as the `?list=`
+link. To revoke, change the secret in the Cloudflare dashboard and reissue the shortcuts.
 
 ### A ChatGPT custom action
 
-1. Create a GPT, then Configure → **Actions**.
-2. Paste the contents of `GET /api/openapi.json`. Fetch it in a browser using the secret-path
-   form of the URL, `https://…workers.dev/<token>/api/openapi.json`, and copy what it returns.
-   The document's `servers` entry keeps whatever path prefix you fetched it through, so the URL
-   it gives is one that works.
-3. Authentication → **API Key**, type **Bearer**, and paste the token. Then the `servers` URL can
-   be the plain origin instead.
+Setup:
+
+1. Fetch the schema at
+   `https://shopping-list-mcp.gavrielgr.workers.dev/<token>/api/openapi.json` in a browser and
+   copy what it returns. **Then edit the `servers` url to the plain origin**,
+   `https://shopping-list-mcp.gavrielgr.workers.dev`, because the token is about to live in the
+   authentication setting instead and should not also sit in the path.
+2. Create a GPT, then Configure → **Actions** → paste the schema.
+3. Authentication → **API Key**, Auth Type **Bearer**, and paste the token.
+4. Paste the instructions below into the GPT's Instructions box.
 
 Anyone you share the GPT with can edit the list, which for a household list is the point. Treat
 it as you would the `?list=` link.
+
+#### Instructions to paste into the GPT
+
+```
+You manage a shared household shopping list through the connected actions.
+The list is in Hebrew and is read on a phone, often mid-shop, so be brief.
+
+Always use the actions. Never answer from memory about what is on the
+list, and never claim to have changed it unless an action returned
+successfully.
+
+Language and format
+- Keep item names in Hebrew unless the user writes in another language.
+- Put quantities and notes in an item's "note", never in its name. "חלב"
+  with note "2 בקבוקים", not "2 בקבוקים חלב".
+- When reporting the list, group by category and omit bought items unless
+  asked. Do not repeat the whole list after a small change; say what
+  changed and the new count.
+
+Choosing an action
+- "what's left", "what do we need" -> getList with pending_only true.
+- "add X", "we're out of X" -> addItems. Batch everything into ONE call:
+  items accepts several names at once.
+- "got X", "bought X", "picked up X" -> checkItems. This is the common one
+  while shopping.
+- "reset the list", "clear the ticks for next week" -> resetList with mode
+  untick, which keeps the rows.
+- "take X off the list", "we don't need X" -> removeItems, which deletes
+  the row. If it was bought rather than unwanted, use checkItems instead
+  so it stays for next time.
+- "send me the list", "share it" -> getLink.
+
+Categories
+- Items belong in supermarket-aisle categories that already exist on the
+  list, so call getList first if you do not know them. Pass the category
+  that fits; a new one is created only if you name one that does not
+  exist.
+
+Ambiguity and errors
+- Names are matched loosely, ignoring case and Hebrew niqqud, so a partial
+  name usually works.
+- When a name matches several rows the response says so and skips that
+  item rather than guessing. Relay that and ask which one was meant. Do
+  not retry with a guess.
+- The "changed" array in a response lists exactly what happened, including
+  items that were skipped. Read it and report it honestly rather than
+  assuming everything worked.
+
+Destructive actions
+- Confirm with the user before removeItems, and before resetList with mode
+  remove, which deletes bought rows and needs confirm true. Say what would
+  be lost. Never call either one speculatively.
+```
+
+The instructions carry their weight: without the batching rule a model adds items one call at a
+time, and without the ambiguity rule it silently picks a row when a name matches several, which
+is exactly what the API refuses to do for it.
 
 ## Tools
 

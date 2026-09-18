@@ -2,21 +2,527 @@
  * Plain HTTP façade over the same tools.
  *
  * This exists because most things that can talk to an API cannot speak MCP: a ChatGPT custom
- * action, an iOS Shortcut driven by Siri, a cron job, curl. Those need ordinary REST with an
- * OpenAPI description.
+ * action, an iOS Shortcut driven by Siri, a cron job, curl.
  *
- * It is deliberately a thin adapter rather than a second implementation. Each route calls the
- * corresponding MCP tool in-process over an in-memory transport, so the two interfaces cannot
- * drift apart: matching, confirmation guards, compare-and-swap writes and error text are the
- * tools' own. The cost is one in-memory round trip per request, which is nothing next to the
- * database call it wraps.
+ * It is a thin adapter rather than a second implementation. Every route calls the corresponding
+ * MCP tool in-process over an in-memory transport, so matching, confirmation guards,
+ * compare-and-swap writes and error text are the tools' own and the two interfaces cannot drift
+ * apart.
  *
- * Only the operations worth having on a phone are exposed. MCP remains the full interface; a
- * sprawling OpenAPI document makes an assistant worse at choosing, not better.
+ * Routes and their OpenAPI description come from one table, so a documented operation cannot
+ * exist without being routed, and the schema cannot describe a parameter the route ignores.
  */
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createServer } from "./server.js";
+
+/** A JSON Schema fragment. Deliberately loose: the shapes below are hand-written. */
+type Schema = Record<string, unknown>;
+
+interface Field {
+  schema: Schema;
+  description: string;
+}
+
+interface Route {
+  method: "GET" | "POST";
+  path: string;
+  /** MCP tool this delegates to. */
+  tool: string;
+  operationId: string;
+  summary: string;
+  description: string;
+  /** Query parameters, for GET routes. */
+  query?: Record<string, Field>;
+  /** Request body properties, for POST routes. */
+  body?: Record<string, Field>;
+  required?: string[];
+  /** Which response shape to document. */
+  response: keyof typeof RESPONSES;
+}
+
+// --- Reusable field definitions -------------------------------------------------------------
+
+const listId: Field = {
+  schema: { type: "string" },
+  description: "Which list. Defaults to the household's main list, so usually omit it."
+};
+const names: Field = {
+  schema: { type: "array", items: { type: "string" } },
+  description: "Product names. Matched loosely, ignoring case and Hebrew niqqud."
+};
+const categoryName: Field = {
+  schema: { type: "string" },
+  description: "Category name, matched loosely."
+};
+const categoryIndex: Field = {
+  schema: { type: "integer", minimum: 0 },
+  description: "Category position instead of a name, zero-based."
+};
+const confirm: Field = {
+  schema: { type: "boolean" },
+  description: "Must be true. Required because this destroys data; ask the user first."
+};
+
+/**
+ * Items for adding.
+ *
+ * Declared as objects rather than "string or object". GPT Actions do not fully support `oneOf`,
+ * `anyOf` or `allOf`, so a union here risks a model being unable to build a valid body at all.
+ * The server still accepts bare strings, which is what an iOS Shortcut sends; the schema simply
+ * describes the richer form.
+ */
+const newItems: Field = {
+  schema: {
+    type: "array",
+    items: {
+      type: "object",
+      required: ["name"],
+      properties: {
+        name: { type: "string", description: "Product name, e.g. חלב." },
+        note: { type: "string", description: "Quantity or note, e.g. 2 יחידות." },
+        category: { type: "string", description: "Category for this item specifically." },
+        checked: { type: "boolean", description: "Whether it starts already bought." }
+      }
+    }
+  },
+  description: "Items to add. Send them all in one call rather than one call each."
+};
+
+// --- Response shapes ------------------------------------------------------------------------
+
+const progress: Schema = {
+  type: "object",
+  properties: {
+    done: { type: "integer" },
+    total: { type: "integer" },
+    percent: { type: "integer" }
+  }
+};
+
+const RESPONSES = {
+  mutation: {
+    description: "What changed.",
+    schema: {
+      type: "object",
+      properties: {
+        ok: { type: "boolean" },
+        list_name: { type: "string" },
+        url: { type: "string" },
+        changed: {
+          type: "array",
+          items: { type: "string" },
+          description: "Exactly what happened, including anything skipped as ambiguous."
+        },
+        progress
+      }
+    }
+  },
+  list: {
+    description: "The list.",
+    schema: {
+      type: "object",
+      properties: {
+        id: { type: "string" },
+        name: { type: "string" },
+        url: { type: "string" },
+        progress,
+        categories: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              index: { type: "integer" },
+              title: { type: "string" },
+              hint: { type: "string", description: "Where it is in the shop." },
+              items: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    name: { type: "string" },
+                    note: { type: "string" },
+                    checked: { type: "boolean" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  lists: {
+    description: "Known lists.",
+    schema: {
+      type: "object",
+      properties: {
+        count: { type: "integer" },
+        lists: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              id: { type: "string" },
+              name: { type: "string" },
+              url: { type: "string" },
+              is_default: { type: "boolean" }
+            }
+          }
+        }
+      }
+    }
+  },
+  link: {
+    description: "The link.",
+    schema: {
+      type: "object",
+      properties: {
+        url: { type: "string" },
+        name: { type: "string" },
+        message: { type: "string", description: "The link with context, ready to send." }
+      }
+    }
+  },
+  deleted: {
+    description: "Confirmation that the list is gone.",
+    schema: {
+      type: "object",
+      properties: { ok: { type: "boolean" }, list_id: { type: "string" }, deleted: { type: "boolean" } }
+    }
+  }
+} as const;
+
+// --- The routes -----------------------------------------------------------------------------
+
+export const ROUTES: Route[] = [
+  {
+    method: "GET",
+    path: "/api/list",
+    tool: "shopping_get_list",
+    operationId: "getList",
+    summary: "Read a list, its categories and what is still to buy",
+    description:
+      "Call this before editing when you do not know what categories or items exist. The " +
+      "category index it returns can be used where a route accepts category_index.",
+    query: {
+      list_id: listId,
+      pending_only: {
+        schema: { type: "boolean" },
+        description: "True to omit items already bought."
+      },
+      category: { schema: { type: "string" }, description: "Limit to one category." }
+    },
+    response: "list"
+  },
+  {
+    method: "GET",
+    path: "/api/lists",
+    tool: "shopping_list_lists",
+    operationId: "listLists",
+    summary: "List the shopping lists that can be reached",
+    description:
+      "Use this to find a list's id. Note that a list created in a browser and never edited " +
+      "through this API may not appear; it can still be addressed by the ?list= value in its URL.",
+    query: {
+      include_progress: {
+        schema: { type: "boolean" },
+        description: "Also read each list for its name and progress. Slower."
+      }
+    },
+    response: "lists"
+  },
+  {
+    method: "GET",
+    path: "/api/link",
+    tool: "shopping_share_list",
+    operationId: "getLink",
+    summary: "Get a shareable link to a list",
+    description:
+      "Returns the link plus a message ready to send in a chat. Anyone who opens the link can " +
+      "edit the list.",
+    query: {
+      list_id: listId,
+      include_items: {
+        schema: { type: "boolean" },
+        description: "Append what is still to buy."
+      },
+      include_progress: { schema: { type: "boolean" }, description: "Append a progress line." }
+    },
+    response: "link"
+  },
+  {
+    method: "POST",
+    path: "/api/items",
+    tool: "shopping_add_items",
+    operationId: "addItems",
+    summary: "Add items to a list",
+    description:
+      "An item already present is not duplicated. A named category that does not exist is " +
+      "created unless create_category is false.",
+    body: {
+      list_id: listId,
+      items: newItems,
+      category: {
+        schema: { type: "string" },
+        description: "Category for items that do not name their own."
+      },
+      create_category: {
+        schema: { type: "boolean" },
+        description: "Create a named category that does not exist yet. Defaults to true."
+      },
+      on_duplicate: {
+        schema: { type: "string", enum: ["skip", "update_note"] },
+        description: "What to do when the item is already there. Defaults to skip."
+      }
+    },
+    required: ["items"],
+    response: "mutation"
+  },
+  {
+    method: "POST",
+    path: "/api/items/check",
+    tool: "shopping_set_checked",
+    operationId: "checkItems",
+    summary: "Mark items bought, or clear the mark",
+    description:
+      "The common action while shopping. Pass checked false to clear a mark, or all true to " +
+      "apply to everything in scope.",
+    body: {
+      list_id: listId,
+      items: names,
+      checked: {
+        schema: { type: "boolean" },
+        description: "True marks bought, false clears. Defaults to true."
+      },
+      category: { schema: { type: "string" }, description: "Restrict the search to one category." },
+      all: {
+        schema: { type: "boolean" },
+        description: "Apply to every item in scope, ignoring items."
+      }
+    },
+    response: "mutation"
+  },
+  {
+    method: "POST",
+    path: "/api/items/update",
+    tool: "shopping_update_item",
+    operationId: "updateItem",
+    summary: "Change one item's name, note or bought mark",
+    description: "For editing a single row. To mark several items bought, use checkItems instead.",
+    body: {
+      list_id: listId,
+      item: { schema: { type: "string" }, description: "Current product name of the row to edit." },
+      category: { schema: { type: "string" }, description: "Restrict the search to one category." },
+      new_name: { schema: { type: "string" }, description: "New product name." },
+      new_note: {
+        schema: { type: "string" },
+        description: "New quantity or note. An empty string clears it."
+      },
+      checked: { schema: { type: "boolean" }, description: "New bought state." }
+    },
+    required: ["item"],
+    response: "mutation"
+  },
+  {
+    method: "POST",
+    path: "/api/items/remove",
+    tool: "shopping_remove_items",
+    operationId: "removeItems",
+    summary: "Delete items from a list",
+    description:
+      "Deletes rows outright. For something that was bought, prefer checkItems so it stays on " +
+      "the list for next time. Confirm with the user first.",
+    body: { list_id: listId, items: names, category: { schema: { type: "string" }, description: "Restrict to one category." } },
+    required: ["items"],
+    response: "mutation"
+  },
+  {
+    method: "POST",
+    path: "/api/items/move",
+    tool: "shopping_move_item",
+    operationId: "moveItem",
+    summary: "Move an item to another category, or reorder it",
+    description: "Supply to_category to move between categories, or to_index alone to reorder.",
+    body: {
+      list_id: listId,
+      item: { schema: { type: "string" }, description: "Product name of the row to move." },
+      from_category: {
+        schema: { type: "string" },
+        description: "Restrict the search for the row to this category."
+      },
+      to_category: { schema: { type: "string" }, description: "Destination category name." },
+      to_category_index: categoryIndex,
+      to_index: {
+        schema: { type: "integer", minimum: 0 },
+        description: "Position within the destination category."
+      }
+    },
+    required: ["item"],
+    response: "mutation"
+  },
+  {
+    method: "POST",
+    path: "/api/reset",
+    tool: "shopping_clear_checked",
+    operationId: "resetList",
+    summary: "Tidy up after a shop",
+    description:
+      "mode untick clears every bought mark but keeps the rows, for a list reused each week. " +
+      "mode remove deletes the bought rows and needs confirm true.",
+    body: {
+      list_id: listId,
+      mode: {
+        schema: { type: "string", enum: ["untick", "remove"] },
+        description: "Defaults to untick, which keeps the rows."
+      },
+      category: { schema: { type: "string" }, description: "Restrict to one category." },
+      confirm: { schema: { type: "boolean" }, description: "Required when mode is remove." }
+    },
+    response: "mutation"
+  },
+  {
+    method: "POST",
+    path: "/api/categories",
+    tool: "shopping_add_category",
+    operationId: "addCategory",
+    summary: "Add a category",
+    description:
+      "Categories are the supermarket-aisle groupings shown as headings. Their order is the " +
+      "route through the shop.",
+    body: {
+      list_id: listId,
+      title: { schema: { type: "string" }, description: "Category name, e.g. פירות וירקות." },
+      hint: {
+        schema: { type: "string" },
+        description: "Where it is in the shop, shown under the title."
+      },
+      items: newItems,
+      position: {
+        schema: { type: "integer", minimum: 0 },
+        description: "Where to insert it. Appended when omitted."
+      }
+    },
+    required: ["title"],
+    response: "mutation"
+  },
+  {
+    method: "POST",
+    path: "/api/categories/update",
+    tool: "shopping_update_category",
+    operationId: "updateCategory",
+    summary: "Rename a category or change its aisle hint",
+    description: "Items inside it are untouched. Supply new_title, new_hint, or both.",
+    body: {
+      list_id: listId,
+      category: categoryName,
+      category_index: categoryIndex,
+      new_title: { schema: { type: "string" }, description: "New category name." },
+      new_hint: {
+        schema: { type: "string" },
+        description: "New aisle hint. An empty string clears it."
+      }
+    },
+    response: "mutation"
+  },
+  {
+    method: "POST",
+    path: "/api/categories/remove",
+    tool: "shopping_remove_category",
+    operationId: "removeCategory",
+    summary: "Remove a category and everything in it",
+    description:
+      "Discards the items inside, so confirm true is required when it still holds any. Ask the " +
+      "user first.",
+    body: { list_id: listId, category: categoryName, category_index: categoryIndex, confirm },
+    response: "mutation"
+  },
+  {
+    method: "POST",
+    path: "/api/categories/move",
+    tool: "shopping_move_category",
+    operationId: "moveCategory",
+    summary: "Reorder a category",
+    description: "Use this to make the list order match the walk through the shop.",
+    body: {
+      list_id: listId,
+      category: categoryName,
+      category_index: categoryIndex,
+      to_index: {
+        schema: { type: "integer", minimum: 0 },
+        description: "Destination position, zero-based."
+      }
+    },
+    required: ["to_index"],
+    response: "mutation"
+  },
+  {
+    method: "POST",
+    path: "/api/lists",
+    tool: "shopping_create_list",
+    operationId: "createList",
+    summary: "Create a new shopping list",
+    description:
+      "Returns the new list including the link that opens it. Use this for a separate occasion, " +
+      "such as a holiday shop, rather than for adding to the existing list.",
+    body: {
+      name: { schema: { type: "string" }, description: "Name for the new list, e.g. קניות לשבת." },
+      categories: {
+        schema: {
+          type: "array",
+          items: {
+            type: "object",
+            required: ["title"],
+            properties: {
+              title: { type: "string", description: "Category name." },
+              hint: { type: "string", description: "Where it is in the shop." }
+            }
+          }
+        },
+        description:
+          "Categories to start with. Omit for a small Hebrew starter set, or send an empty array for none."
+      },
+      list_id: {
+        schema: { type: "string" },
+        description: "Use this exact id instead of generating one. Usually omit."
+      }
+    },
+    response: "list"
+  },
+  {
+    method: "POST",
+    path: "/api/list/rename",
+    tool: "shopping_rename_list",
+    operationId: "renameList",
+    summary: "Rename a list",
+    description: "Changes the name shown on the page. Not for renaming a category.",
+    body: { list_id: listId, name: { schema: { type: "string" }, description: "New name." } },
+    required: ["name"],
+    response: "mutation"
+  },
+  {
+    method: "POST",
+    path: "/api/list/delete",
+    tool: "shopping_delete_list",
+    operationId: "deleteList",
+    summary: "Permanently delete a list",
+    description:
+      "Deletes the list for everyone holding its link. It cannot be undone. Always confirm with " +
+      "the user, and never call it speculatively. list_id is required: there is deliberately no " +
+      "default, so the main list cannot be deleted by omission.",
+    body: {
+      list_id: {
+        schema: { type: "string" },
+        description: "Id of the list to delete. Required, with no default."
+      },
+      confirm
+    },
+    required: ["list_id", "confirm"],
+    response: "deleted"
+  }
+];
+
+// --- Dispatch -------------------------------------------------------------------------------
 
 interface ToolCallResult {
   content?: { type: string; text?: string }[];
@@ -56,7 +562,6 @@ async function callTool(name: string, args: Record<string, unknown>): Promise<Re
   }
 }
 
-/** Parse a JSON body, tolerating an empty one. */
 async function readBody(request: Request): Promise<Record<string, unknown>> {
   const raw = await request.text();
   if (!raw.trim()) return {};
@@ -72,96 +577,63 @@ async function readBody(request: Request): Promise<Record<string, unknown>> {
 }
 
 /**
- * Accept `items` as either strings or objects.
+ * Accept `items` as strings as well as objects.
  *
- * `["חלב", "ביצים"]` is what a Shortcut or a language model naturally produces; the objects are
- * there for when a note or a per-item category is needed.
+ * The schema describes objects, because GPT Actions handle a union badly, but an iOS Shortcut
+ * can only produce an array of text, so both are accepted here.
  */
 function normalizeItems(value: unknown): unknown {
   if (!Array.isArray(value)) return value;
   return value.map(entry => (typeof entry === "string" ? { name: entry } : entry));
 }
 
-/** Drop keys the caller left out, so tool defaults apply instead of explicit undefined. */
-const defined = (record: Record<string, unknown>): Record<string, unknown> =>
-  Object.fromEntries(Object.entries(record).filter(([, value]) => value !== undefined));
-
-export interface RestRoute {
-  method: string;
-  path: string;
+/** Coerce a query string value according to its declared schema. */
+function coerce(raw: string, schema: Schema): unknown {
+  if (schema.type === "boolean") return raw !== "false" && raw !== "0" && raw !== "";
+  if (schema.type === "integer" || schema.type === "number") {
+    const value = Number(raw);
+    return Number.isFinite(value) ? value : raw;
+  }
+  return raw;
 }
 
-/**
- * Handle a request under `/api/`.
- *
- * Returns null when the path is not a REST route, so the caller can fall through.
- */
+/** Handle a request under `/api/`. Returns null when the path is not a REST route. */
 export async function handleRest(request: Request, path: string, url: URL): Promise<Response | null> {
-  const route = `${request.method.toUpperCase()} ${path}`;
-  const query = url.searchParams;
-  const boolOf = (name: string): boolean | undefined => {
-    const raw = query.get(name);
-    if (raw === null) return undefined;
-    return raw !== "false" && raw !== "0";
-  };
+  if (!path.startsWith("/api/")) return null;
+  const method = request.method.toUpperCase();
+
+  if (method === "GET" && path === "/api/openapi.json") {
+    return json(200, openApiDocument(url));
+  }
+
+  const route = ROUTES.find(entry => entry.path === path && entry.method === method);
+  if (!route) {
+    const alternatives = ROUTES.filter(entry => entry.path === path).map(entry => entry.method);
+    return json(alternatives.length ? 405 : 404, {
+      error: alternatives.length ? "method_not_allowed" : "not_found",
+      message: alternatives.length
+        ? `${path} accepts ${alternatives.join(", ")}, not ${method}.`
+        : `No route ${method} ${path}. See GET /api/openapi.json for the available operations.`
+    });
+  }
 
   try {
-    switch (route) {
-      case "GET /api/openapi.json":
-        return json(200, openApiDocument(url));
-
-      case "GET /api/list":
-        return await callTool(
-          "shopping_get_list",
-          defined({
-            list_id: query.get("list_id") ?? undefined,
-            pending_only: boolOf("pending_only"),
-            category: query.get("category") ?? undefined,
-            response_format: "json"
-          })
-        );
-
-      case "GET /api/link":
-        return await callTool(
-          "shopping_share_list",
-          defined({
-            list_id: query.get("list_id") ?? undefined,
-            include_items: boolOf("include_items"),
-            include_progress: boolOf("include_progress"),
-            response_format: "json"
-          })
-        );
-
-      case "POST /api/items": {
-        const body = await readBody(request);
-        return await callTool(
-          "shopping_add_items",
-          defined({ ...body, items: normalizeItems(body.items), response_format: "json" })
-        );
+    const args: Record<string, unknown> = { response_format: "json" };
+    if (route.method === "GET") {
+      for (const [name, field] of Object.entries(route.query ?? {})) {
+        const raw = url.searchParams.get(name);
+        if (raw !== null) args[name] = coerce(raw, field.schema);
       }
-
-      case "POST /api/items/check": {
-        const body = await readBody(request);
-        return await callTool("shopping_set_checked", defined({ ...body, response_format: "json" }));
+    } else {
+      const body = await readBody(request);
+      for (const [name, value] of Object.entries(body)) {
+        if (value !== undefined && value !== null) args[name] = value;
       }
-
-      case "POST /api/items/remove": {
-        const body = await readBody(request);
-        return await callTool("shopping_remove_items", defined({ ...body, response_format: "json" }));
+      if (args.items !== undefined && route.tool !== "shopping_set_checked" && route.tool !== "shopping_remove_items") {
+        args.items = normalizeItems(args.items);
       }
-
-      case "POST /api/reset": {
-        const body = await readBody(request);
-        return await callTool("shopping_clear_checked", defined({ ...body, response_format: "json" }));
-      }
-
-      default:
-        if (!path.startsWith("/api/")) return null;
-        return json(404, {
-          error: "not_found",
-          message: `No route ${route}. See GET /api/openapi.json for the available operations.`
-        });
     }
+    return await callTool(route.tool, args);
   } catch (error) {
     if (error instanceof SyntaxError) {
       return json(400, { error: "invalid_body", message: `Could not read the JSON body: ${error.message}` });
@@ -173,68 +645,62 @@ export async function handleRest(request: Request, path: string, url: URL): Prom
   }
 }
 
-/** OpenAPI 3.1 description, for a ChatGPT custom action or any other client that wants one. */
+/**
+ * OpenAPI 3.1 description, generated from the route table.
+ *
+ * No `oneOf`, `anyOf` or `allOf` anywhere: GPT Actions do not fully support them, and a union in
+ * a request body can leave a model unable to construct a valid call at all.
+ */
 export function openApiDocument(url: URL): Record<string, unknown> {
-  // Preserve a secret path prefix if the caller reached us through one, so the generated server
-  // URL is one that actually works for them.
+  // Preserve a secret path prefix if the caller reached us through one, so the server url given
+  // back is one that actually works for them.
   const prefix = url.pathname.replace(/\/api\/openapi\.json$/, "");
-  const server = `${url.origin}${prefix}`;
+  const paths: Record<string, Record<string, unknown>> = {};
 
-  const listId = {
-    name: "list_id",
-    in: "query",
-    required: false,
-    schema: { type: "string" },
-    description: "Which list. Defaults to the household's main list, so usually omit it."
-  };
-  const itemsProperty = {
-    type: "array",
-    description:
-      "Product names. Plain strings are fine; use objects to add a note or a per-item category.",
-    items: {
-      oneOf: [
-        { type: "string" },
-        {
-          type: "object",
-          required: ["name"],
-          properties: {
-            name: { type: "string", description: "Product name, e.g. חלב." },
-            note: { type: "string", description: "Quantity or note, e.g. 2 יחידות." },
-            category: { type: "string", description: "Category for this item specifically." },
-            checked: { type: "boolean", description: "Whether it starts ticked off." }
-          }
+  for (const route of ROUTES) {
+    const operation: Record<string, unknown> = {
+      operationId: route.operationId,
+      summary: route.summary,
+      description: route.description,
+      responses: {
+        "200": {
+          description: RESPONSES[route.response].description,
+          content: { "application/json": { schema: RESPONSES[route.response].schema } }
         }
-      ]
+      }
+    };
+
+    if (route.method === "GET" && route.query) {
+      operation.parameters = Object.entries(route.query).map(([name, field]) => ({
+        name,
+        in: "query",
+        required: false,
+        schema: field.schema,
+        description: field.description
+      }));
     }
-  };
-  const mutation = {
-    description: "What changed.",
-    content: {
-      "application/json": {
-        schema: {
-          type: "object",
-          properties: {
-            ok: { type: "boolean" },
-            list_name: { type: "string" },
-            changed: { type: "array", items: { type: "string" } },
-            progress: {
+    if (route.method === "POST" && route.body) {
+      operation.requestBody = {
+        required: Boolean(route.required?.length),
+        content: {
+          "application/json": {
+            schema: {
               type: "object",
-              properties: {
-                done: { type: "integer" },
-                total: { type: "integer" },
-                percent: { type: "integer" }
-              }
+              ...(route.required?.length ? { required: route.required } : {}),
+              properties: Object.fromEntries(
+                Object.entries(route.body).map(([name, field]) => [
+                  name,
+                  { ...field.schema, description: field.description }
+                ])
+              )
             }
           }
         }
-      }
+      };
     }
-  };
-  const names = {
-    type: "array",
-    items: { type: "string" },
-    description: "Product names. Matched loosely, ignoring case and Hebrew niqqud."
-  };
+
+    paths[route.path] = { ...(paths[route.path] ?? {}), [route.method.toLowerCase()]: operation };
+  }
 
   return {
     openapi: "3.1.0",
@@ -242,231 +708,13 @@ export function openApiDocument(url: URL): Record<string, unknown> {
       title: "Shopping list",
       version: "1.0.0",
       description:
-        "Read and edit a shared household shopping list. Items and categories are in Hebrew. " +
-        "Put quantities in an item's note rather than in its name. Names are matched loosely, " +
-        "so a partial name usually works; when one matches several rows the response says so " +
-        "and skips it rather than guessing."
+        "Read and edit shared household shopping lists. Items and categories are in Hebrew. " +
+        "Put quantities in an item's note rather than in its name. Names are matched loosely, so " +
+        "a partial name usually works; when one matches several rows the response says so and " +
+        "skips it rather than guessing, so relay that and ask which was meant. Every write " +
+        "returns a changed array naming exactly what happened, including anything skipped."
     },
-    servers: [{ url: server }],
-    paths: {
-      "/api/list": {
-        get: {
-          operationId: "getList",
-          summary: "Read the list, its categories and what is still to buy",
-          parameters: [
-            listId,
-            {
-              name: "pending_only",
-              in: "query",
-              required: false,
-              schema: { type: "boolean" },
-              description: "True to omit items already bought."
-            },
-            {
-              name: "category",
-              in: "query",
-              required: false,
-              schema: { type: "string" },
-              description: "Limit to one category."
-            }
-          ],
-          responses: {
-            "200": {
-              description: "The list.",
-              content: {
-                "application/json": {
-                  schema: {
-                    type: "object",
-                    properties: {
-                      name: { type: "string" },
-                      url: { type: "string" },
-                      progress: {
-                        type: "object",
-                        properties: {
-                          done: { type: "integer" },
-                          total: { type: "integer" },
-                          percent: { type: "integer" }
-                        }
-                      },
-                      categories: {
-                        type: "array",
-                        items: {
-                          type: "object",
-                          properties: {
-                            title: { type: "string" },
-                            hint: { type: "string" },
-                            items: {
-                              type: "array",
-                              items: {
-                                type: "object",
-                                properties: {
-                                  name: { type: "string" },
-                                  note: { type: "string" },
-                                  checked: { type: "boolean" }
-                                }
-                              }
-                            }
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-      "/api/items": {
-        post: {
-          operationId: "addItems",
-          summary: "Add items to the list",
-          description:
-            "Adds several items in one call. An item already present is not duplicated. A named " +
-            "category that does not exist is created unless create_category is false.",
-          requestBody: {
-            required: true,
-            content: {
-              "application/json": {
-                schema: {
-                  type: "object",
-                  required: ["items"],
-                  properties: {
-                    list_id: { type: "string" },
-                    items: itemsProperty,
-                    category: {
-                      type: "string",
-                      description: "Category for items that do not name their own."
-                    },
-                    create_category: { type: "boolean" },
-                    on_duplicate: { type: "string", enum: ["skip", "update_note"] }
-                  }
-                }
-              }
-            }
-          },
-          responses: { "200": mutation }
-        }
-      },
-      "/api/items/check": {
-        post: {
-          operationId: "checkItems",
-          summary: "Tick items off, or un-tick them",
-          description:
-            "Use this when something has been bought. Pass checked=false to clear a tick, or " +
-            "all=true to apply to everything, which is how you reset the list for next time.",
-          requestBody: {
-            required: true,
-            content: {
-              "application/json": {
-                schema: {
-                  type: "object",
-                  properties: {
-                    list_id: { type: "string" },
-                    items: names,
-                    checked: { type: "boolean", description: "True ticks off, false clears." },
-                    category: { type: "string" },
-                    all: { type: "boolean" }
-                  }
-                }
-              }
-            }
-          },
-          responses: { "200": mutation }
-        }
-      },
-      "/api/items/remove": {
-        post: {
-          operationId: "removeItems",
-          summary: "Delete items from the list",
-          description:
-            "Deletes rows outright. For something that was bought, prefer checkItems so it stays " +
-            "on the list for next time.",
-          requestBody: {
-            required: true,
-            content: {
-              "application/json": {
-                schema: {
-                  type: "object",
-                  required: ["items"],
-                  properties: {
-                    list_id: { type: "string" },
-                    items: names,
-                    category: { type: "string" }
-                  }
-                }
-              }
-            }
-          },
-          responses: { "200": mutation }
-        }
-      },
-      "/api/reset": {
-        post: {
-          operationId: "resetList",
-          summary: "Tidy up after a shop",
-          description:
-            "mode=untick clears every tick but keeps the rows, for a list reused each week. " +
-            "mode=remove deletes the bought rows and requires confirm=true.",
-          requestBody: {
-            required: false,
-            content: {
-              "application/json": {
-                schema: {
-                  type: "object",
-                  properties: {
-                    list_id: { type: "string" },
-                    mode: { type: "string", enum: ["untick", "remove"] },
-                    category: { type: "string" },
-                    confirm: { type: "boolean" }
-                  }
-                }
-              }
-            }
-          },
-          responses: { "200": mutation }
-        }
-      },
-      "/api/link": {
-        get: {
-          operationId: "getLink",
-          summary: "Get a shareable link to the list",
-          description: "Returns the link plus a message ready to send in a chat.",
-          parameters: [
-            listId,
-            {
-              name: "include_items",
-              in: "query",
-              required: false,
-              schema: { type: "boolean" },
-              description: "Append what is still to buy."
-            },
-            {
-              name: "include_progress",
-              in: "query",
-              required: false,
-              schema: { type: "boolean" }
-            }
-          ],
-          responses: {
-            "200": {
-              description: "The link.",
-              content: {
-                "application/json": {
-                  schema: {
-                    type: "object",
-                    properties: {
-                      url: { type: "string" },
-                      name: { type: "string" },
-                      message: { type: "string" }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    }
+    servers: [{ url: `${url.origin}${prefix}` }],
+    paths
   };
 }

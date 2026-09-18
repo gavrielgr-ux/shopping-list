@@ -881,3 +881,48 @@ test("share_list with verify=false builds the URL without reading anything", asy
     await harness.close();
   }
 });
+
+test("every reading tool's output validates in each of its modes", async () => {
+  // Output schemas are only checked when a tool actually runs, so a mode nothing exercises can
+  // ship with a schema that contradicts the code. That is exactly how shopping_list_lists came
+  // to declare `reachable` non-nullable while returning null for an unread list.
+  const harness = await startHarness({ data: { [LIST_PATH]: seedList() } });
+  try {
+    const calls: [string, Record<string, unknown>][] = [
+      ["shopping_list_lists", { include_progress: true }],
+      ["shopping_list_lists", { include_progress: false }],
+      ["shopping_get_list", {}],
+      ["shopping_get_list", { pending_only: true }],
+      ["shopping_get_list", { category: "חלב" }],
+      ["shopping_share_list", {}],
+      ["shopping_share_list", { include_items: true, include_progress: true }],
+      ["shopping_share_list", { list_id: "never-seen-list", verify: false }]
+    ];
+    for (const [name, args] of calls) {
+      // data() throws if the call errored, which an output-validation failure does.
+      await harness.data(name, { ...args, response_format: "json" });
+    }
+  } finally {
+    await harness.close();
+  }
+});
+
+test("list_lists reports reachable as null when it did not read the lists", async () => {
+  const harness = await startHarness({ data: { [LIST_PATH]: seedList() } });
+  try {
+    const result = await harness.data<{ lists: { reachable: boolean | null }[] }>(
+      "shopping_list_lists",
+      { include_progress: false, response_format: "json" }
+    );
+    assert.ok(result.lists.length > 0);
+    for (const entry of result.lists) {
+      assert.equal(entry.reachable, null, "nothing was read, so it is unknown, not true");
+    }
+    // And the markdown must not call it unreachable, which would be a different claim.
+    const text = await harness.text("shopping_list_lists", { include_progress: false });
+    assert.match(text, /not checked/);
+    assert.doesNotMatch(text, /\(unreachable\)/);
+  } finally {
+    await harness.close();
+  }
+});

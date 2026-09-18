@@ -54,7 +54,7 @@ Args:
 Returns JSON with schema:
   {
     "count": number,
-    "lists": [ { "id": string, "name": string, "url": string, "progress": { "done": number, "total": number, "percent": number } | null, "reachable": boolean, "is_default": boolean } ],
+    "lists": [ { "id": string, "name": string, "url": string, "progress": { "done": number, "total": number, "percent": number } | null, "reachable": boolean | null, "is_default": boolean } ],
     "enumeration_allowed": boolean
   }
 
@@ -84,7 +84,12 @@ Examples:
                   percent: z.number().int()
                 })
                 .nullable(),
-              reachable: z.boolean().describe("False when the list is missing, deleted or unreadable."),
+              reachable: z
+                .boolean()
+                .nullable()
+                .describe(
+                  "False when the list is missing, deleted or unreadable. Null when include_progress was false, so nothing was read and it is genuinely unknown."
+                ),
               is_default: z.boolean().describe("True for the list the site opens by default.")
             })
           )
@@ -141,7 +146,11 @@ Examples:
       const output = { count: lists.length, lists, enumeration_allowed: discovered !== null };
       const lines = ["# Shopping lists", ""];
       for (const entry of lists) {
-        const flags = [entry.is_default ? "default" : null, entry.reachable ? null : "unreachable"]
+        const flags = [
+          entry.is_default ? "default" : null,
+          entry.reachable === false ? "unreachable" : null,
+          entry.reachable === null ? "not checked" : null
+        ]
           .filter(Boolean)
           .join(", ");
         lines.push(`## ${entry.name}${flags ? ` (${flags})` : ""}`);
