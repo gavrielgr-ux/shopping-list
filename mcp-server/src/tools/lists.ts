@@ -213,6 +213,124 @@ Error handling:
   );
 
   server.registerTool(
+    "shopping_share_list",
+    {
+      title: "Get a shareable link to a list",
+      description: `Produce the link that opens a list, plus a ready-to-send message for a DM.
+
+This is the equivalent of the share button on the page: the link carries the list's ?list= id, so
+whoever opens it sees the same live list and their edits sync back. Anyone with the link can
+edit, so treat it as an invitation rather than a read-only view.
+
+The link is confirmed to open something before it is handed back, so a dead or deleted id is
+reported rather than sent. Pass verify=false to skip that read and just build the URL.
+
+Args:
+  - list_id (string): list to link to (default: the site's default list)
+  - include_items (boolean): append what is still left to buy, grouped by category (default: false)
+  - include_progress (boolean): append a "33 / 47 bought" line (default: false)
+  - verify (boolean): read the list first to confirm the link works (default: true)
+
+Returns JSON with schema:
+  {
+    "list_id": string,       // the id in the link
+    "name": string,          // list name, or null when unverified
+    "url": string,           // the shareable link
+    "message": string,       // the whole thing, ready to paste into a DM
+    "verified": boolean      // whether the list was confirmed to exist
+  }
+
+Examples:
+  - Use when: "send me a link to the shopping list" -> the message is what you paste
+  - Use when: "share the list with what's left on it" -> include_items=true
+  - Don't use when: you want to read the list yourself — use shopping_get_list
+
+Error handling:
+  - Returns an error if the list does not exist or was deleted, so a dead link is never sent`,
+      inputSchema: {
+        list_id: listIdField,
+        include_items: z
+          .boolean()
+          .default(false)
+          .describe("Append the items still to buy, grouped by category."),
+        include_progress: z.boolean().default(false).describe("Append a progress line."),
+        verify: z
+          .boolean()
+          .default(true)
+          .describe("Read the list first to confirm the link opens something."),
+        response_format: responseFormatField
+      },
+      outputSchema: {
+        list_id: z.string().describe("The id carried in the link."),
+        name: z.string().nullable().describe("List name, or null when verify=false."),
+        url: z.string().describe("The shareable link."),
+        message: z.string().describe("The link with its context, ready to paste into a DM."),
+        verified: z.boolean().describe("Whether the list was confirmed to exist.")
+      },
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true }
+    },
+    guard(async ({ list_id, include_items, include_progress, verify, response_format }) => {
+      const id = assertListId(list_id);
+      const url = urlForList(id);
+
+      if (!verify) {
+        const output = { list_id: id, name: null, url, message: url, verified: false };
+        return reply(
+          response_format,
+          [`Link to \`${id}\` (not verified, so it may not open anything):`, "", url].join("\n"),
+          output
+        );
+      }
+
+      // requireList throws a described error for a missing or deleted list, which is the point:
+      // a link nobody can open is worse than no link.
+      const loaded = await requireList(id);
+      await rememberList(id, loaded.payload.name);
+      const progress = progressOf(loaded.payload);
+
+      const lines = [loaded.payload.name, url];
+      if (include_progress) {
+        lines.push("", `${progress.done} / ${progress.total} נקנו`);
+      }
+      if (include_items) {
+        const pending = loaded.payload.departments
+          .map(category => ({
+            title: category.title,
+            items: category.items.filter(item => item.name.trim() && !item.checked)
+          }))
+          .filter(entry => entry.items.length);
+        lines.push("");
+        if (!pending.length) {
+          lines.push("הרשימה הושלמה, לא נשאר מה לקנות.");
+        } else {
+          for (const entry of pending) {
+            lines.push(`${entry.title}:`);
+            for (const item of entry.items) {
+              lines.push(`• ${item.name}${item.note ? ` (${item.note})` : ""}`);
+            }
+          }
+        }
+      }
+      const message = lines.join("\n").trim();
+
+      const output = { list_id: id, name: loaded.payload.name, url, message, verified: true };
+      return reply(
+        response_format,
+        [
+          `Shareable link to **${loaded.payload.name}**, ready to send:`,
+          "",
+          "```",
+          message,
+          "```",
+          "",
+          "_Anyone who opens it can edit the list, and their changes sync back._"
+        ].join("\n"),
+        output
+      );
+    })
+  );
+
+  server.registerTool(
     "shopping_create_list",
     {
       title: "Create a shopping list",

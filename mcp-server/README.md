@@ -63,7 +63,7 @@ To work on it in a checkout of your own (Node.js 20 or newer):
 ```bash
 cd mcp-server
 npm install        # also builds, via the prepare script
-npm test           # 73 tests
+npm test           # 79 tests
 npm run doctor     # check authentication, database access and rules
 ```
 
@@ -156,6 +156,7 @@ Every tool is prefixed `shopping_`, takes an optional `list_id` (defaulting to
 | --- | --- |
 | `shopping_list_lists` | Known lists with ids, links and progress |
 | `shopping_get_list` | Read a list; `pending_only` for what is left to buy |
+| `shopping_share_list` | Shareable link plus a ready-to-paste message for a DM |
 | `shopping_create_list` | New list, returns its shareable link |
 | `shopping_rename_list` | Rename a list |
 | `shopping_delete_list` | Delete a list — needs `confirm: true` |
@@ -184,6 +185,7 @@ Every tool is prefixed `shopping_`, takes an optional `list_id` (defaulting to
 
 ```
 "What's left to buy?"           → shopping_get_list { pending_only: true }
+"Send me a link to the list"    → shopping_share_list { include_items: true }
 "Add milk, eggs and bread"      → shopping_add_items { items: [...], category: "חלב וביצים" }
 "Got the milk and the carrots"  → shopping_set_checked { items: ["חלב", "גזר"] }
 "Make it 3 bottles of olive oil"→ shopping_update_item { item: "שמן זית", new_note: "3 בקבוקים" }

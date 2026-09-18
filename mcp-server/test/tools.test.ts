@@ -21,6 +21,7 @@ test("every tool is advertised with a description and annotations", async () => 
       "shopping_remove_items",
       "shopping_rename_list",
       "shopping_set_checked",
+      "shopping_share_list",
       "shopping_update_category",
       "shopping_update_item"
     ]);
@@ -779,6 +780,102 @@ test("a list with no categories survives the database pruning empty values away"
     assert.deepEqual(
       view.categories[0]?.items.map(item => item.name),
       ["חלב"]
+    );
+  } finally {
+    await harness.close();
+  }
+});
+
+test("share_list builds a pasteable message and confirms the link works", async () => {
+  const harness = await startHarness({ data: { [LIST_PATH]: seedList() } });
+  try {
+    const result = await harness.data<{
+      list_id: string;
+      name: string;
+      url: string;
+      message: string;
+      verified: boolean;
+    }>("shopping_share_list", { response_format: "json" });
+
+    assert.equal(result.verified, true);
+    assert.equal(result.name, "רשימת קניות");
+    assert.equal(result.url, `https://gavrielgr-ux.github.io/shopping-list/?list=${LIST_ID}`);
+    // The default message is just the name and the link, which is what a DM wants.
+    assert.equal(result.message, `רשימת קניות\nhttps://gavrielgr-ux.github.io/shopping-list/?list=${LIST_ID}`);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("share_list can append progress and what is left to buy", async () => {
+  const harness = await startHarness({ data: { [LIST_PATH]: seedList() } });
+  try {
+    const result = await harness.data<{ message: string }>("shopping_share_list", {
+      include_progress: true,
+      include_items: true,
+      response_format: "json"
+    });
+    assert.match(result.message, /1 \/ 5 נקנו/);
+    assert.match(result.message, /^פירות וירקות:$/m);
+    assert.match(result.message, /^• גזר$/m);
+    assert.match(result.message, /^• חמאה \(2 יחידות\)$/m);
+    // Already-bought rows are left out, and so are placeholder rows.
+    assert.doesNotMatch(result.message, /תפוח עץ/);
+    assert.doesNotMatch(result.message, /^• $/m);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("share_list says so when nothing is left to buy", async () => {
+  const harness = await startHarness({ data: { [LIST_PATH]: seedList() } });
+  try {
+    await harness.text("shopping_set_checked", { all: true });
+    const result = await harness.data<{ message: string }>("shopping_share_list", {
+      include_items: true,
+      response_format: "json"
+    });
+    assert.match(result.message, /הרשימה הושלמה/);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("share_list refuses to hand out a link to a list that does not exist", async () => {
+  const harness = await startHarness();
+  try {
+    // A link nobody can open is worse than no link, so this is an error rather than a URL.
+    const message = await harness.error("shopping_share_list");
+    assert.match(message, /No list exists/);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("share_list refuses to hand out a link to a deleted list", async () => {
+  const harness = await startHarness({ data: { [LIST_PATH]: { deleted: true, deletedAt: 1 } } });
+  try {
+    const message = await harness.error("shopping_share_list");
+    assert.match(message, /was deleted/);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("share_list with verify=false builds the URL without reading anything", async () => {
+  const harness = await startHarness();
+  try {
+    const result = await harness.data<{ url: string; verified: boolean; name: string | null }>(
+      "shopping_share_list",
+      { list_id: "never-seen-list", verify: false, response_format: "json" }
+    );
+    assert.equal(result.verified, false);
+    assert.equal(result.name, null);
+    assert.equal(result.url, "https://gavrielgr-ux.github.io/shopping-list/?list=never-seen-list");
+    // No database read was needed to produce it.
+    assert.equal(
+      harness.rtdb.requests.filter(entry => entry.url.includes("never-seen-list")).length,
+      0
     );
   } finally {
     await harness.close();
