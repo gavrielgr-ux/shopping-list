@@ -22,6 +22,7 @@ mobile app** and **Cowork**. They have no computer at all: a phone is the only d
 | `mcp-server/` | TypeScript MCP server, 16 tools, 97 tests |
 | `mcp-server/src/index.ts` | stdio entry point |
 | `mcp-server/src/worker.ts` | Cloudflare Worker entry point (HTTPS) |
+| `mcp-server/src/rest.ts` | Plain REST + OpenAPI façade over the same tools, under `/api/` |
 | `mcp-server/wrangler.toml` | Worker deploy config, self-building |
 | `.mcp.json` | Registers the stdio server for Claude Code, via `mcp-server/bin/launch.sh` |
 | `.claude/hooks/session-start.sh` | Installs and builds `mcp-server/` before a remote session starts |
@@ -56,6 +57,11 @@ project and is not a secret.
 - **The Worker**, run under `wrangler dev` in `workerd`: MCP handshake over HTTP, `tools/list`
   returning all 16, and a tool call that read the live database.
 - 97 tests pass. `cd mcp-server && npm test`.
+- **The live page still works after the `list-model.js` change.** Rendered in headless Chromium
+  against the deployed site: it synced from Firebase in about two seconds, showed the real list
+  name, all 9 categories and 33/47 progress, matching what the MCP tools report, with no page
+  errors. The deployed `list-model.js` is byte-identical to `main`, and `mcp-server/` returns 404
+  on the published site, so the Jekyll exclude works.
 
 ## What is blocking, and what has been ruled out
 
@@ -82,12 +88,19 @@ claude.ai browser action. A newly added connector appears in the app on the next
 
 ## Try these, in this order
 
-### A. Does this Cowork session already have the tools? (cheapest, try first)
+### A. Does this session already have the tools? (cheapest, try first, but expect no)
 
-If Cowork can run a local MCP server from a repository, the committed `.mcp.json` should give
-you all 16 tools with no connector, no Cloudflare and no token. Check whether tools named
-`shopping_*` are available to you. If they are, the problem is solved: confirm with
-`shopping_get_list` and tell the owner.
+Check whether tools named `shopping_*` are available to you. If they are, the problem is
+solved: confirm with `shopping_get_list` and tell the owner.
+
+**Expect this to fail in Cowork and claude.ai.** Anthropic's own documentation is explicit:
+"Local MCP servers configured in Claude Desktop via claude_desktop_config.json are a separate
+mechanism and do use your local network, but those aren't available in Cowork or claude.ai."
+So the committed `.mcp.json` is unlikely to be picked up outside Claude Code. It is still worth
+one message to confirm, because it costs nothing and would end the whole problem.
+
+**It does work in Claude Code**, including Claude Code on the web, which runs in a phone
+browser. That is the one surface where this is already solved.
 
 If they are not, find out whether this session can (a) clone the repo and (b) run shell
 commands. If both, then `cd mcp-server && npm install && npm run doctor` will say whether the
@@ -115,9 +128,56 @@ family shopping list arguably belongs there rather than in an employer's Claude 
 
 Details in `mcp-server/README.md`.
 
-### C. Ask the work org's Claude Owner to enable custom connectors
+### B2. Skip assistants entirely: Siri, or a ChatGPT action
 
-Only if the owner actually wants this on the work account.
+The Worker serves a REST API under `/api/` with an OpenAPI document, behind the same token. That
+reaches the goal without any connector at all:
+
+- An **iOS Shortcut** posting to `/api/items`, triggered by Siri. No AI subscription, no org
+  permission, and each family member installs it once. For adding an item while standing in a
+  shop this is better than any assistant route.
+- A **ChatGPT custom action**, importing `/api/openapi.json`. Shareable by GPT link.
+
+Note that every assistant route requires per-person setup on that person's own account. There is
+no mechanism in any of them for sharing your access. So for family sharing, the web page plus a
+Shortcut is structurally simpler than any AI integration.
+
+### C. Ask the work org's Claude Owner to add it
+
+Only if the owner actually wants this on the work account. Per Anthropic's documentation this is
+not a switch the member can flip: **"only Owners can add them to Team and Enterprise plans."**
+An Owner or Primary Owner must:
+
+1. Go to Organization settings → Connectors.
+2. Click Add, hover Custom, select Web.
+3. Enter the remote MCP server URL. OAuth Client ID and Secret are optional, under Advanced
+   settings, so a server guarded by a bearer or path token is acceptable.
+
+The member then goes to Customize → Connectors and clicks Connect on the entry the Owner added.
+
+## Facts confirmed against Anthropic's documentation
+
+Read first-hand from
+<https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp>
+(dated August 11, 2026), so these supersede any guess earlier in this file:
+
+- Custom connectors using remote MCP are available on **Claude, Cowork and Claude Desktop**, for
+  **Free, Pro, Max, Team and Enterprise**. **Free is limited to one custom connector**, which is
+  why a personal account is a viable route.
+- **Only Owners can add them on Team and Enterprise plans.** Members connect to what an Owner
+  added; they cannot add their own.
+- On Pro and Max, a member adds one themselves with **"+" then "Add custom connector"**.
+- **Claude connects to the server from Anthropic's cloud infrastructure, not from your device**,
+  across every client including the mobile apps. The server must be reachable over the public
+  internet from Anthropic's IP ranges. A Cloudflare Worker satisfies this; anything on a private
+  network or behind a VPN does not.
+- OAuth is optional. A server authenticating by shared token is acceptable.
+
+One further correction: the "Projects redesigned" announcement of 17 September 2026 is a
+**Claude Code** feature, in beta for select Pro and Max subscribers using cloud sessions. It is
+not a claude.ai chat feature, so it does not provide a route around the connector restriction,
+though it would suit this repository well, since Claude Code is where the committed `.mcp.json`
+already works.
 
 ## Notes for whoever continues
 

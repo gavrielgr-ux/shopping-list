@@ -63,5 +63,13 @@ the app again afterwards. It is then available in the app, in Cowork and on clau
 Full steps, including the checkout-based alternative, are in
 [`mcp-server/README.md`](mcp-server/README.md).
 
-For the tool reference, the design notes and how to use it from Claude Desktop or a local
-checkout, see [`mcp-server/README.md`](mcp-server/README.md).
+### From Siri, ChatGPT, or anything that speaks HTTP
+
+The Worker also serves a plain REST API under `/api/`, described by `/api/openapi.json`, behind
+the same token. That covers the things that cannot speak MCP: an iOS Shortcut triggered by Siri
+("add milk to the shopping list"), a ChatGPT custom action, or `curl`. The Shortcut route needs
+no AI subscription and no organisation permission, which makes it the simplest thing to share
+with family.
+
+For the tool reference, the HTTP API, the design notes and how to use it from Claude Desktop or
+a local checkout, see [`mcp-server/README.md`](mcp-server/README.md).

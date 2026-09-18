@@ -13,8 +13,12 @@
  *    already an independent read or compare-and-swap against the database.
  *  - Fail closed. Without a configured access token the Worker serves nothing, because the
  *    alternative is a public URL that can edit the family's shopping lists.
+ *
+ * Two interfaces are served, both behind the same token: `/mcp` for MCP clients, and `/api/*`
+ * for everything that cannot speak MCP, such as a ChatGPT custom action or an iOS Shortcut.
  */
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
+import { handleRest } from "./rest.js";
 import { createServer } from "./server.js";
 
 export interface WorkerEnv {
@@ -97,17 +101,21 @@ export default {
       );
     }
 
-    if (rest !== "/mcp") {
-      return json(404, {
-        error: "not_found",
-        message: `Nothing is served at ${rest}. The MCP endpoint is /mcp.`
-      });
-    }
-
     // Env bindings are not visible to module-scope code, so hand the credential over before the
     // first database call. Everything else has a working default baked in.
     if (env.SHOPPING_LIST_DB_SECRET && !process.env.SHOPPING_LIST_DB_SECRET) {
       process.env.SHOPPING_LIST_DB_SECRET = env.SHOPPING_LIST_DB_SECRET;
+    }
+
+    // Plain HTTP interface, for callers that cannot speak MCP.
+    const restResponse = await handleRest(request, rest, url);
+    if (restResponse) return restResponse;
+
+    if (rest !== "/mcp") {
+      return json(404, {
+        error: "not_found",
+        message: `Nothing is served at ${rest}. The MCP endpoint is /mcp; the HTTP API is under /api/, described by /api/openapi.json.`
+      });
     }
 
     const server = createServer();
