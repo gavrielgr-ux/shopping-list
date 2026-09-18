@@ -292,21 +292,91 @@ Bear in mind that a URL carrying a token lands in browser history and possibly i
 so prefer the header form for anything permanent. Rotating the token is just editing the secret
 in the Cloudflare dashboard.
 
-### Siri, via an iOS Shortcut
+### Siri, via iOS Shortcuts
 
-This needs no AI subscription, no connector and no organisation permission, and it is the
-fastest route while actually standing in a shop. Each family member installs it once.
+No AI subscription, no connector, no organisation permission, and the fastest route while
+actually standing in a shop. Each family member installs the shortcuts once.
 
-1. Shortcuts → new shortcut → add **Dictate Text**.
-2. Add **Get Contents of URL**:
-   - URL `https://<your-worker>.workers.dev/api/items`
-   - Method **POST**
-   - Header `Authorization` = `Bearer <your token>`
-   - Request Body **JSON**, with a field `items` of type Array containing the Dictated Text, and
-     a field `category` set to whichever category you want new items to land in.
-3. Name it something Siri can hear, such as "add to shopping list".
+**What this is and is not.** A Shortcut is one fixed HTTP call, not an agent. It cannot reason
+about what you meant, so you build one small shortcut per task rather than one clever one. Four
+cover daily use. Anything structural, creating a list, renaming or reordering categories, moving
+items between them, stays on the MCP side, which means Claude Code.
 
-Ticking things off works the same way against `/api/items/check`.
+Everything below uses:
+
+- Base URL `https://shopping-list-mcp.gavrielgr.workers.dev`
+- A header, on every shortcut: `Authorization` = `Bearer <your token>`
+
+Name each shortcut as the phrase you want to say, in whatever language your Siri is set to,
+because iOS runs a shortcut by its name.
+
+#### 1. Add items
+
+The one you will use most. It handles several items in one breath by splitting on commas.
+
+1. Shortcuts → **+** → Add Action → **Dictate Text**.
+2. Add Action → **Split Text**. Set *Text* to the Dictated Text variable, and *Separator* to
+   **Custom**, `, ` (comma and space). This turns "חלב, ביצים, לחם" into three items instead of
+   one long one.
+3. Add Action → **Get Contents of URL**:
+   - URL: `https://shopping-list-mcp.gavrielgr.workers.dev/api/items`
+   - Expand **Show More**
+   - Method: **POST**
+   - Headers: add `Authorization` with value `Bearer <your token>`
+   - Request Body: **JSON**
+   - Add field `items`, change its type to **Array**, and put the **Split Text** variable inside
+   - Add field `category`, type **Text**, set to the category new items should land in, for
+     example `מזווה ורטבים`
+4. Rename the shortcut to what you want to say, such as **"הוסף לרשימת קניות"**.
+
+A note on `category`: the list has nine categories, so the API needs to know which one, and a
+single shortcut can only carry a fixed answer. Two ways to live with that. Either point it at a
+sensible catch-all and re-file later from Claude Code, or name a category that does not exist
+yet, such as `להוסיף`, which gets created on first use and acts as an inbox. If you want
+per-aisle precision instead, duplicate the shortcut per category and name each one accordingly,
+for example "הוסף לפירות וירקות".
+
+#### 2. Tick items off
+
+This one needs no category, because names are searched across the whole list.
+
+Same as above, but the URL is `/api/items/check` and the JSON body has only the `items` array.
+Name it **"קניתי"**.
+
+Matching is loose and ignores Hebrew niqqud, so saying "חלב" ticks off "חלב 3%". If a name
+matches several rows the API refuses to guess and says so, which brings us to the next one.
+
+#### 3. What is left to buy
+
+1. **Get Contents of URL**, method **GET**:
+   `https://shopping-list-mcp.gavrielgr.workers.dev/api/link?include_items=true&include_progress=true`
+   with the same `Authorization` header.
+2. Add Action → **Get Dictionary Value**, key `message`.
+3. Add Action → **Show Result**, or **Speak Text** if you want it read aloud.
+
+The `message` field is already formatted for a human, grouped by category, which is why this
+reads better than parsing `/api/list`.
+
+#### 4. Reset for next week
+
+**Get Contents of URL**, **POST** to `/api/reset`, same header, Request Body **JSON** with one
+field `mode` set to `untick`. That clears every tick and keeps the rows. Name it
+**"אפס את רשימת הקניות"**.
+
+There is deliberately no shortcut for `mode=remove`, which deletes bought rows and requires
+`confirm=true`. A voice command is the wrong place for something irreversible.
+
+#### Seeing whether it worked
+
+Every mutating response contains a `changed` array naming exactly what happened, including items
+that were skipped as ambiguous or not found. Add **Get Dictionary Value** for `changed` followed
+by **Show Result** while you are setting a shortcut up; remove it once you trust it.
+
+#### Sharing with family
+
+Shortcuts are shareable, but the token travels inside them, so whoever holds the shortcut can
+edit the list. That is the intent for a household, and it is the same exposure as the `?list=`
+link. To revoke, change the secret in the Cloudflare dashboard and reissue the shortcuts.
 
 ### A ChatGPT custom action
 
