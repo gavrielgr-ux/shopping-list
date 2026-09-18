@@ -18,6 +18,10 @@ export interface FakeOptions {
   onConflict?: (store: Map<string, unknown>) => void;
   /** Reject the first N database requests with 401, as an expired token would. */
   unauthorizedBefore?: number;
+  /** Reject every database request the way an egress proxy does: 403, plain text. */
+  blockedByProxy?: boolean;
+  /** Reject every database request the way Firebase's own security rules do. */
+  deniedByRules?: boolean;
 }
 
 export interface FakeRtdb {
@@ -125,6 +129,18 @@ export function installFakeRtdb(options: FakeOptions = {}): FakeRtdb {
     const path = pathOf(url);
     if (!url.searchParams.get("auth")) {
       return new Response("Permission denied", { status: 401 });
+    }
+    if (options.blockedByProxy) {
+      return new Response(
+        `Host not in allowlist: ${url.host}. Add this host to your network egress settings to allow access.`,
+        { status: 403, headers: { "Content-Type": "text/plain" } }
+      );
+    }
+    if (options.deniedByRules) {
+      return new Response('{"error":"Permission denied"}', {
+        status: 403,
+        headers: { "Content-Type": "application/json" }
+      });
     }
     if (unauthorizedLeft > 0) {
       unauthorizedLeft -= 1;

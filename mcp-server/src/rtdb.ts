@@ -29,13 +29,42 @@ const endpoint = (path: string, query: Record<string, string> = {}): string => {
   return `${DATABASE_URL}/${encoded}.json${search.size ? `?${search}` : ""}`;
 };
 
+const databaseHost = (): string => new URL(DATABASE_URL).host;
+
+/**
+ * True when a rejection came from the database itself rather than from something in between.
+ *
+ * The Realtime Database answers a refusal with a JSON body such as
+ * `{"error":"Permission denied"}`. A proxy or egress filter standing in front of it answers
+ * with its own plain-text message, and blaming the security rules for that would send the
+ * reader to the wrong console entirely.
+ */
+function isFirebaseRefusal(body: string): boolean {
+  try {
+    const parsed = JSON.parse(body) as { error?: unknown };
+    return typeof parsed?.error === "string";
+  } catch {
+    return false;
+  }
+}
+
 function describe(error: HttpError): Error {
   if (error.status === 401 || error.status === 403) {
+    if (!isFirebaseRefusal(error.body)) {
+      // Relay the intermediary's own words: they usually name the exact remedy.
+      const upstream = error.body.trim().slice(0, 300);
+      return new Error(
+        `A network policy between this machine and the database refused the request (HTTP ${error.status})` +
+          `${upstream ? `: ${upstream}` : "."} ` +
+          `Nothing is wrong with the list or with Firebase — the host ${databaseHost()} has to be ` +
+          "reachable from wherever this server runs. In Claude Code on the web, add it to the " +
+          "environment's network egress allowlist; elsewhere, allow it in the proxy or firewall."
+      );
+    }
     return new Error(
-      `Access to the Realtime Database was refused (HTTP ${error.status}). Most likely the database ` +
-        "security rules do not grant this identity read/write on the list path — check them in the " +
-        "Firebase console, or set SHOPPING_LIST_DB_SECRET to authenticate as an admin. If this machine " +
-        `reaches the internet through a proxy, confirm it allows ${new URL(DATABASE_URL).host}.`
+      `The Realtime Database refused access (HTTP ${error.status}): ${error.body.trim().slice(0, 200)}. ` +
+        "The security rules most likely do not grant this identity read/write on the list path — check " +
+        "them in the Firebase console, or set SHOPPING_LIST_DB_SECRET to authenticate as an admin."
     );
   }
   if (error.status === 404) {

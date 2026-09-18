@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "shopping-list": {
-      "command": "node",
-      "args": ["mcp-server/dist/src/index.js"]
+      "command": "sh",
+      "args": ["mcp-server/bin/launch.sh"]
     }
   }
 }

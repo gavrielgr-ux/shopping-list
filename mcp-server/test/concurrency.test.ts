@@ -112,3 +112,30 @@ test("an expired token is renewed and the request replayed", async () => {
     await harness.close();
   }
 });
+
+test("an egress block is reported as a network policy problem, not a Firebase one", async () => {
+  // The proxy in front of the database answers with its own plain-text message. Blaming the
+  // security rules for that would send the reader to the wrong console entirely.
+  const harness = await startHarness({ data: { [LIST_PATH]: seedList() }, blockedByProxy: true });
+  try {
+    const message = await harness.error("shopping_get_list");
+    assert.match(message, /network policy/);
+    assert.match(message, /Host not in allowlist/);
+    assert.match(message, /network egress allowlist/);
+    assert.doesNotMatch(message, /security rules/);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("a rules denial is reported as a Firebase permissions problem", async () => {
+  const harness = await startHarness({ data: { [LIST_PATH]: seedList() }, deniedByRules: true });
+  try {
+    const message = await harness.error("shopping_get_list");
+    assert.match(message, /security rules/);
+    assert.match(message, /Firebase console/);
+    assert.doesNotMatch(message, /network policy/);
+  } finally {
+    await harness.close();
+  }
+});

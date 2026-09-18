@@ -51,17 +51,47 @@ those rows are hidden from tool output and excluded from the progress count. A d
 replaced by `{ "deleted": true, "deletedAt": … }`, which is what makes open tabs clear their
 local copy.
 
-## Install
+## Setup
 
-Requires Node.js 20 or newer.
+Nothing to do by hand. `.claude/hooks/session-start.sh` installs and builds this directory
+before a Claude Code on the web session starts, and the container is cached afterwards, so a
+cold start costs a few seconds and later sessions are instant. `.mcp.json` then launches the
+server through `bin/launch.sh`, which rebuilds on demand if the hook never ran.
+
+To work on it in a checkout of your own (Node.js 20 or newer):
 
 ```bash
 cd mcp-server
-npm install        # also builds
-npm run doctor     # checks auth, database access and rules
+npm install        # also builds, via the prepare script
+npm test           # 73 tests
+npm run doctor     # check authentication, database access and rules
 ```
 
-`npm run doctor` prints one line per check and says what to do about a failure. Expect:
+### The one thing that does need configuring
+
+The server reaches the database over the public internet, so wherever it runs has to be allowed
+to connect to:
+
+```
+shopping-list-27ffd-default-rtdb.firebaseio.com
+```
+
+Claude Code on the web restricts outbound network access to an allowlist chosen per
+environment, and that host is not on it by default. Until it is added, every tool call fails
+with `HTTP 403` and the server says so explicitly:
+
+```
+A network policy between this machine and the database refused the request (HTTP 403):
+Host not in allowlist: shopping-list-27ffd-default-rtdb.firebaseio.com. Add this host to your
+network egress settings to allow access. …
+```
+
+Add it under the environment's network egress settings — see
+[the Claude Code on the web docs](https://code.claude.com/docs/en/claude-code-on-the-web). The
+SessionStart hook probes for this and prints a warning at session start, so a blocked
+environment announces itself rather than looking like a broken server.
+
+`npm run doctor` gives the full picture and tells apart the three things that look alike:
 
 ```
 1. authentication      ok (credential length 858)
@@ -69,16 +99,21 @@ npm run doctor     # checks auth, database access and rules
 3. enumerate lists     not permitted by the database rules — … (this is fine)
 ```
 
+A refusal by the *network* and a refusal by Firebase's *security rules* produce different
+messages, because they need fixing in different places: the first in the environment's egress
+settings, the second in the Firebase console.
+
 ## Connect it
 
-### Claude Code
+### Claude Code (web or CLI)
 
-The repository ships a project-scoped `.mcp.json`, so opening this repo with Claude Code
-offers the server automatically — approve it once when prompted. To register it globally
-instead:
+Already wired: `.mcp.json` at the repository root registers this server, so opening the repo
+offers it — approve it once when prompted. Nothing else to install.
+
+To register it globally for a checkout instead:
 
 ```bash
-claude mcp add shopping-list --scope user -- node /absolute/path/to/shopping-list/mcp-server/dist/src/index.js
+claude mcp add shopping-list --scope user -- sh /absolute/path/to/shopping-list/mcp-server/bin/launch.sh
 ```
 
 ### Claude Desktop
@@ -91,8 +126,8 @@ Add to `claude_desktop_config.json` (macOS:
 {
   "mcpServers": {
     "shopping-list": {
-      "command": "node",
-      "args": ["/absolute/path/to/shopping-list/mcp-server/dist/src/index.js"]
+      "command": "sh",
+      "args": ["/absolute/path/to/shopping-list/mcp-server/bin/launch.sh"]
     }
   }
 }
@@ -102,7 +137,8 @@ Use an absolute path — the app does not start in this directory.
 
 ### Anything else
 
-It is a standard stdio server: run `node dist/src/index.js`. To poke at it by hand:
+It is a standard stdio server: run `sh bin/launch.sh`, or `node dist/src/index.js` once built.
+To poke at it by hand:
 
 ```bash
 npm run inspect     # opens the MCP Inspector
@@ -218,14 +254,14 @@ The state file holds a refresh token for the server's own anonymous identity, an
 ## Tests
 
 ```bash
-npm test        # 71 tests
+npm test        # 73 tests
 ```
 
 The tests run the real server over an in-memory MCP transport against a fake Realtime Database
-that reproduces ETag compare-and-swap and the numeric-key array quirk. Because the calls go
+that reproduces ETag compare-and-swap, empty-value pruning and the numeric-key array quirk. Because the calls go
 through an actual MCP client, they also check the SDK's own input coercion and validate every
 response against its declared output schema. Covered, among others: concurrent-edit retry,
-`updatedAt` monotonicity, token refresh after a `401`, ambiguous-name handling, and every
-confirmation guard.
+`updatedAt` monotonicity, token refresh after a `401`, ambiguous-name handling, telling a
+network block apart from a rules denial, and every confirmation guard.
 
 Nothing in the suite touches the network or the real list.

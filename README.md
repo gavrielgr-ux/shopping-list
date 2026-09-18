@@ -14,6 +14,7 @@ everyone holding its link.
 | `list-model.js` | Pure helpers for list ids, payload normalization and merge rules |
 | `mcp-server/` | MCP server letting an AI assistant read and edit the lists — see its [README](mcp-server/README.md) |
 | `.mcp.json` | Registers that server for Claude Code when this repo is opened |
+| `.claude/hooks/` | SessionStart hook that builds the server before a web session starts |
 
 The site is static, with no build step: GitHub Pages serves the repository root, and `app.js`
 loads the Firebase SDK straight from `gstatic.com`. Lists live in a Firebase Realtime Database
@@ -30,12 +31,19 @@ browser's `localStorage` only, which is why the database has no index of lists.
 up in an open tab within moments — nothing to refresh or deploy. It offers full CRUD over
 lists, categories and items.
 
-```bash
-cd mcp-server
-npm install      # also builds
-npm run doctor   # verify it can reach the list
+It needs no installing. A SessionStart hook builds it before a Claude Code on the web session
+starts, and `.mcp.json` registers it, so opening this repository is enough.
+
+**One setting is required.** The server reaches Firebase over the public internet, and Claude
+Code on the web only allows outbound connections to an allowlisted set of hosts. Add
+
+```
+shopping-list-27ffd-default-rtdb.firebaseio.com
 ```
 
-Opening this repository with Claude Code then offers the server via `.mcp.json`; approve it
-once. For Claude Desktop, other clients, the full tool reference and the design notes, see
-[`mcp-server/README.md`](mcp-server/README.md).
+to the environment's network egress settings
+([docs](https://code.claude.com/docs/en/claude-code-on-the-web)). Until then every tool call
+fails with `HTTP 403`, and the hook warns about it at session start.
+
+For the tool reference, the design notes and how to use it from Claude Desktop or a local
+checkout, see [`mcp-server/README.md`](mcp-server/README.md).
