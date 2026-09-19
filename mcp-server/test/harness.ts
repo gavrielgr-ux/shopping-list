@@ -1,6 +1,6 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { installFakeRtdb, type FakeOptions, type FakeRtdb } from "./fake-rtdb.js";
@@ -64,6 +64,37 @@ const textOf = (result: CallResult): string =>
     .join("\n");
 
 /**
+ * Refuse to run if redirecting the state directory did not take effect.
+ *
+ * `constants.ts` resolves `STATE_DIR` once, when it is first imported. A test file that pulls in
+ * anything from `src/` at the top of the file therefore loads it before `startHarness` runs, and
+ * the tests then write the developer's real state file: their reusable Firebase identity and
+ * their registry of known lists, which `shopping_list_lists` reports. Nothing about that is
+ * visible while the tests pass, and it has already happened once, so it is checked here rather
+ * than left to import order.
+ */
+function assertRedirected(stateDir: string, requested: string | undefined): void {
+  const temporary = resolve(tmpdir());
+  if (!resolve(stateDir).startsWith(temporary)) {
+    throw new Error(
+      `the test state directory is ${stateDir}, outside ${temporary}: something under src/ was ` +
+        "imported before startHarness could redirect it, so these tests would write real state. " +
+        "Import what the test needs from this harness, or load it dynamically after the first " +
+        "startHarness call."
+    );
+  }
+  if (requested !== undefined && resolve(stateDir) !== resolve(requested)) {
+    // A later call cannot move it, so a test asking for a specific directory and quietly getting
+    // another one would assert against state it is not actually using.
+    throw new Error(
+      `this harness asked for the state directory ${requested} but ${stateDir} was already ` +
+        "resolved. Only the first startHarness call in a process can choose it, so a test that " +
+        "needs its own must be in its own file."
+    );
+  }
+}
+
+/**
  * Start the server against a fake database and connect a real MCP client to it.
  *
  * Going through the client rather than calling handlers directly means the tests also check
@@ -78,6 +109,9 @@ export async function startHarness(
   process.env.SHOPPING_LIST_STATE_DIR =
     options.stateDir ?? mkdtempSync(join(tmpdir(), "shopping-list-mcp-test-"));
   const rtdb = installFakeRtdb(options);
+
+  const { STATE_DIR } = await import("../src/constants.js");
+  assertRedirected(STATE_DIR, options.stateDir);
 
   const { useStateBackend } = await import("../src/state.js");
   const { fileBackend } = await import("../src/state-file.js");

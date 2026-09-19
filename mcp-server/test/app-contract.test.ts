@@ -84,8 +84,11 @@ test("the shared index key can never be opened or created as a list", () => {
   // write there and nowhere else. What keeps it from colliding with a real list is that its key
   // is not a usable list id: the page refuses to open it and assertListId refuses to create it.
   // If either side ever started accepting the key, a list could occupy the index path.
+  // The literal is also written out in `list-index.test.ts`, which cannot import this constant
+  // without loading the state directory before its harness can redirect it, so pin the whole
+  // path here and not just the key.
+  assert.equal(LIST_INDEX_PATH, "shared-lists/!index");
   const key = LIST_INDEX_PATH.split("/").pop();
-  assert.equal(key, "!index");
   assert.equal(
     getListIdFromLocation(`https://example.test/?list=${encodeURIComponent(key!)}`),
     null,

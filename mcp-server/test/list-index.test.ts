@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { LIST_INDEX_PATH } from "../src/constants.js";
 import { LIST_ID, LIST_PATH, seedList, startHarness } from "./harness.js";
 
 /**
@@ -12,6 +11,15 @@ import { LIST_ID, LIST_PATH, seedList, startHarness } from "./harness.js";
  * the user had to paste its id before anything could be done with it. The fix is a shared index
  * that both the page and this server write to, exercised here.
  */
+
+/**
+ * Written out rather than imported from `constants.ts`, which resolves the state directory the
+ * moment it is first imported: pulling it in at the top of this file loaded it before the
+ * harness could redirect that, and these tests then wrote the developer's real state file.
+ * `LIST_INDEX_PATH` is pinned against this value in `app-contract.test.ts`, which starts no
+ * server and so can import it safely.
+ */
+const LIST_INDEX_PATH = "shared-lists/!index";
 
 const entryPath = (id: string): string => `${LIST_INDEX_PATH}/${id}`;
 
