@@ -1,15 +1,25 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { categoriesOf, itemNames, LIST_PATH, seedList, startHarness } from "./harness.js";
+import { categoriesOf, itemNames, LIST_ID, LIST_PATH, seedList, startHarness } from "./harness.js";
 
 test("a write is conditional on the version that was read", async () => {
   const harness = await startHarness({ data: { [LIST_PATH]: seedList() } });
   try {
     await harness.text("shopping_set_checked", { items: ["חלב"] });
-    const writes = harness.rtdb.requests.filter(entry => entry.method === "PUT");
+    const indexSegment = encodeURIComponent("!index");
+    const writes = harness.rtdb.requests.filter(
+      entry => entry.method === "PUT" && entry.url.includes(LIST_ID) && !entry.url.includes(indexSegment)
+    );
     assert.equal(writes.length, 1);
     // Without if-match the write would be a blind overwrite of whatever is stored.
     assert.ok(writes[0]?.headers["if-match"], "the write must carry an if-match precondition");
+    // The edit also advertises the list in the shared index. That write is deliberately
+    // unconditional: one list owns its entry, so there is no race worth a compare-and-swap.
+    const advertisements = harness.rtdb.requests.filter(
+      entry => entry.method === "PUT" && entry.url.includes(indexSegment)
+    );
+    assert.equal(advertisements.length, 1);
+    assert.equal(advertisements[0]?.headers["if-match"], undefined);
     const reads = harness.rtdb.requests.filter(
       entry => entry.method === "GET" && entry.headers["x-firebase-etag"] === "true"
     );

@@ -12,6 +12,8 @@ export interface FakeOptions {
   data?: Record<string, unknown>;
   /** Reject the shallow read of the lists root, as restrictive rules would. */
   blockEnumeration?: boolean;
+  /** Reject any read or write of this exact path, as rules that do not cover it would. */
+  denyPath?: string;
   /** Fail the next N conditional writes with 412, simulating a concurrent editor. */
   conflictsBeforeSuccess?: number;
   /** Mutate stored state just before a conflict is reported, as a racing writer would. */
@@ -76,6 +78,28 @@ const pathOf = (url: URL): string =>
     .map(decodeURIComponent)
     .join("/");
 
+/**
+ * Assemble a node from the descendants stored beneath it.
+ *
+ * The database is a tree: writing `a/b/c` and then reading `a/b` returns `{c: ...}`. The store
+ * here is a flat map of paths, so a read of a node nobody wrote directly has to be reassembled.
+ * Without this, the shared list index would look empty to every reader, because it is only ever
+ * written one child at a time.
+ */
+function assembleFrom(store: Map<string, unknown>, path: string): unknown {
+  const prefix = `${path}/`;
+  const children: Record<string, unknown> = {};
+  for (const [key, value] of store) {
+    if (!key.startsWith(prefix)) continue;
+    const rest = key.slice(prefix.length);
+    const [head, ...tail] = rest.split("/");
+    if (!head) continue;
+    if (tail.length) children[head] = assembleFrom(store, `${path}/${head}`);
+    else children[head] = value;
+  }
+  return Object.keys(children).length ? children : null;
+}
+
 /** Install the fake. Call `restore()` afterwards to put the real `fetch` back. */
 export function installFakeRtdb(options: FakeOptions = {}): FakeRtdb {
   const original = globalThis.fetch;
@@ -83,6 +107,7 @@ export function installFakeRtdb(options: FakeOptions = {}): FakeRtdb {
   const requests: FakeRtdb["requests"] = [];
   let conflictsLeft = options.conflictsBeforeSuccess ?? 0;
   let unauthorizedLeft = options.unauthorizedBefore ?? 0;
+  const subtree = (path: string): unknown => assembleFrom(store, path);
 
   const json = (body: unknown, init: ResponseInit = {}): Response =>
     new Response(JSON.stringify(body), {
@@ -142,6 +167,12 @@ export function installFakeRtdb(options: FakeOptions = {}): FakeRtdb {
         headers: { "Content-Type": "application/json" }
       });
     }
+    if (options.denyPath !== undefined && path === options.denyPath) {
+      return new Response('{"error":"Permission denied"}', {
+        status: 401,
+        headers: { "Content-Type": "application/json" }
+      });
+    }
     if (unauthorizedLeft > 0) {
       unauthorizedLeft -= 1;
       return new Response('{"error":"Auth token is expired"}', { status: 401 });
@@ -159,7 +190,7 @@ export function installFakeRtdb(options: FakeOptions = {}): FakeRtdb {
         const unique = [...new Set(keys)];
         return json(unique.length ? Object.fromEntries(unique.map(key => [key, true])) : null);
       }
-      const value = store.has(path) ? store.get(path) : null;
+      const value = store.has(path) ? store.get(path) : subtree(path);
       return new Response(JSON.stringify(value ?? null), {
         status: 200,
         headers: {
@@ -195,6 +226,14 @@ export function installFakeRtdb(options: FakeOptions = {}): FakeRtdb {
         status: 200,
         headers: { "Content-Type": "application/json", ETag: etagOf(parsed) }
       });
+    }
+
+    if (method === "DELETE") {
+      // Removing a node removes everything under it, so drop descendant paths too.
+      for (const key of [...store.keys()]) {
+        if (key === path || key.startsWith(`${path}/`)) store.delete(key);
+      }
+      return new Response("null", { status: 200, headers: { "Content-Type": "application/json" } });
     }
 
     return new Response(`Unexpected ${method} ${href}`, { status: 500 });

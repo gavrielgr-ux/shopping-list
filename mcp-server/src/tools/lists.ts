@@ -1,6 +1,13 @@
 import { z } from "zod";
-import { DEFAULT_LIST_ID, DEFAULT_LIST_NAME, LISTS_ROOT } from "../constants.js";
+import {
+  DEFAULT_LIST_ID,
+  DEFAULT_LIST_NAME,
+  LIST_ID_PATTERN,
+  LIST_INDEX_PATH,
+  LISTS_ROOT
+} from "../constants.js";
 import { buildView, renderList, renderSummary, reply } from "../format.js";
+import { readListIndex } from "../list-index.js";
 import { normalizePayload, progressOf } from "../normalize.js";
 import { NetworkBlocked, readNode, shallowKeys } from "../rtdb.js";
 import { listIdField, listViewShape, mutationShape, responseFormatField } from "../schemas.js";
@@ -41,11 +48,14 @@ export function registerListTools(server: Server): void {
       description: `Show the shopping lists this server can reach, with their ids and links.
 
 Sources, merged and de-duplicated:
+  - the shared index at "${LIST_INDEX_PATH}", which both the web page and this server write to whenever a list is saved. This is what makes a list created in a browser discoverable here
   - the local registry of every list this server has previously read or written
   - the site's default list, always included
   - a direct enumeration of the database, which only works if the security rules allow reading the "${LISTS_ROOT}" root; when they do not, it is skipped silently
 
-A list created in a browser and never touched through this server will not appear, because the web app keeps its "recent lists" only in the browser's localStorage and the database holds no index. Pass its id (the ?list= value from its URL) to any tool directly.
+index_available in the output says whether the shared index could be read. When it is false the answer is only as complete as this server's own history, so a list the user mentions but that is missing from the output may still exist: ask for its id (the ?list= value from its URL) and pass that to any tool directly.
+
+A list last saved by a browser running a version of the page from before the shared index existed appears once that browser opens it again.
 
 Args:
   - include_progress (boolean): also read each list to report its name and progress. Costs one read per list (default: true)
@@ -55,13 +65,14 @@ Returns JSON with schema:
   {
     "count": number,
     "lists": [ { "id": string, "name": string, "url": string, "progress": { "done": number, "total": number, "percent": number } | null, "reachable": boolean | null, "is_default": boolean } ],
+    "index_available": boolean,
     "enumeration_allowed": boolean
   }
 
 Examples:
   - Use when: "which shopping lists do I have?"
   - Use when: you need a list id before calling another tool
-  - Don't use when: you already know the id — call shopping_get_list directly`,
+  - Don't use when: you already know the id, call shopping_get_list directly`,
       inputSchema: {
         include_progress: z
           .boolean()
@@ -94,6 +105,11 @@ Examples:
             })
           )
           .describe("Known lists, default first."),
+        index_available: z
+          .boolean()
+          .describe(
+            "Whether the shared list index could be read. False means the output is only as complete as this server's own history, so a list may exist without being named here."
+          ),
         enumeration_allowed: z
           .boolean()
           .describe("Whether the database allowed listing the lists root directly.")
@@ -102,14 +118,30 @@ Examples:
     },
     guard(async ({ include_progress, response_format }) => {
       const registry = await knownLists();
-      // A NetworkBlocked here is deliberately not caught: reporting a total egress block as
-      // "the rules do not allow enumeration" would send the reader to the wrong place.
+      // A NetworkBlocked from either of these is deliberately not caught: reporting a total
+      // egress block as "the rules do not allow this read" would send the reader to the wrong
+      // place.
+      const indexed = await readListIndex();
       const discovered = await shallowKeys(LISTS_ROOT);
-      const ids = new Set<string>([DEFAULT_LIST_ID, ...registry.map(entry => entry.id), ...(discovered ?? [])]);
+
+      // The shared index is written by whichever side last saved a list, so it outranks the
+      // local registry, which only moves when this server touches something. A rename done in
+      // the browser reaches the index and never reaches the registry.
+      const names = new Map<string, string>();
+      for (const entry of registry) names.set(entry.id, entry.name);
+      for (const entry of indexed ?? []) names.set(entry.id, entry.name);
+
+      const ids = new Set<string>([
+        DEFAULT_LIST_ID,
+        ...names.keys(),
+        // Enumeration returns every child of the lists root, which includes the index node
+        // itself. Anything that is not a usable list id is not a list.
+        ...(discovered ?? []).filter(key => LIST_ID_PATTERN.test(key))
+      ]);
 
       const lists = await Promise.all(
         [...ids].map(async id => {
-          const fallbackName = registry.find(entry => entry.id === id)?.name ?? DEFAULT_LIST_NAME;
+          const fallbackName = names.get(id) ?? DEFAULT_LIST_NAME;
           const base = {
             id,
             url: urlForList(id),
@@ -143,7 +175,12 @@ Examples:
         return left.name.localeCompare(right.name, "he");
       });
 
-      const output = { count: lists.length, lists, enumeration_allowed: discovered !== null };
+      const output = {
+        count: lists.length,
+        lists,
+        index_available: indexed !== null,
+        enumeration_allowed: discovered !== null
+      };
       const lines = ["# Shopping lists", ""];
       for (const entry of lists) {
         const flags = [
@@ -159,9 +196,13 @@ Examples:
         if (entry.progress) lines.push(`- progress: ${entry.progress.done} / ${entry.progress.total}`);
         lines.push("");
       }
-      if (discovered === null) {
+      if (indexed === null) {
         lines.push(
-          "_The database did not allow enumerating all lists, so this shows the default list plus any list this server has touched. Lists created in a browser and never edited here must be named by id._"
+          "_The shared list index could not be read, so this shows the default list plus any list this server has touched. Another list may exist; it can be opened by the `?list=` id from its URL._"
+        );
+      } else if (discovered === null) {
+        lines.push(
+          `_Listed from the shared index (${indexed.length} ${indexed.length === 1 ? "entry" : "entries"}), which the page and this server both keep up to date. The database does not allow enumerating every list directly, so a list whose browser has not opened it since the index was introduced is reachable only by its \`?list=\` id._`
         );
       }
       return reply(response_format, lines.join("\n").trimEnd(), output);

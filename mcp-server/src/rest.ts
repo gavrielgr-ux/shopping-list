@@ -169,6 +169,11 @@ const RESPONSES = {
               is_default: { type: "boolean" }
             }
           }
+        },
+        index_available: {
+          type: "boolean",
+          description:
+            "False when the shared index of lists could not be read, meaning a list may exist without being named here."
         }
       }
     }
@@ -222,8 +227,10 @@ export const ROUTES: Route[] = [
     operationId: "listLists",
     summary: "List the shopping lists that can be reached",
     description:
-      "Use this to find a list's id. Note that a list created in a browser and never edited " +
-      "through this API may not appear; it can still be addressed by the ?list= value in its URL.",
+      "Use this to find a list's id. Lists are discovered from a shared index that both the web " +
+      "page and this API keep up to date, so a list created in a browser appears here. When " +
+      "index_available is false that index could not be read, and a list missing from the " +
+      "response may still exist: it can be addressed by the ?list= value in its URL.",
     query: {
       include_progress: {
         schema: { type: "boolean" },

@@ -6,9 +6,9 @@ import {
   SITE_URL,
   WRITE_RETRIES
 } from "./constants.js";
+import { recordList, unpublishList } from "./list-index.js";
 import { isDeleted, matchAll, normalizePayload, serializePayload } from "./normalize.js";
 import { ABSENT_ETAG, PreconditionFailed, readNode, writeNode } from "./rtdb.js";
-import { rememberList } from "./state.js";
 import type { Category, ListItem, ListPayload, LoadedList } from "./types.js";
 
 /** An error whose message is meant to be read by the model and acted on. */
@@ -121,7 +121,7 @@ export async function mutateList<T>(
     const body = serializePayload(draft, loaded.payload.updatedAt);
 
     if (contentOf(body) === contentOf(serializePayload(before, loaded.payload.updatedAt))) {
-      await rememberList(listId, before.name);
+      await recordList(listId, before.name);
       return { before, after: before, detail, retries: attempt, wrote: false };
     }
 
@@ -134,7 +134,7 @@ export async function mutateList<T>(
     }
 
     const after = normalizePayload(body);
-    await rememberList(listId, after.name);
+    await recordList(listId, after.name);
     return { before, after, detail, retries: attempt, wrote: true };
   }
 
@@ -161,7 +161,7 @@ export async function createList(id: string, name: string, departments: Category
   const body = serializePayload(payload, null);
   await writeNode(pathFor(listId), body, existing.etag ?? ABSENT_ETAG);
   const created = normalizePayload(body);
-  await rememberList(listId, created.name);
+  await recordList(listId, created.name);
   return created;
 }
 
@@ -179,9 +179,17 @@ export async function deleteList(id: string): Promise<void> {
     throw new ToolError(`No list exists at id "${listId}", so there is nothing to delete.`);
   }
   if (isDeleted(existing.value)) {
+    // A tombstone with a live index entry is stale advertising: the client that wrote the
+    // tombstone is the one meant to retract the entry, and it may have failed to, or may have
+    // predated the index. Repair it here rather than from a reading tool, which would make a
+    // tool clients can auto-approve into a writer.
+    await unpublishList(listId);
     throw new ToolError(`List "${listId}" is already deleted.`);
   }
   await writeNode(pathFor(listId), { deleted: true, deletedAt: Date.now() }, existing.etag ?? null);
+  // Stop advertising a list nobody can open. Best-effort inside `unpublishList`: the deletion
+  // itself has already committed, so a failure here must not be reported as one.
+  await unpublishList(listId);
 }
 
 /** How a caller points at a category: by position, or by (fuzzy) title. */
