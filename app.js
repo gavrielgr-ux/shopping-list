@@ -35,6 +35,45 @@ const defaultDepartments = [
   { title:'טיפוח אישי', hint:'פארם', items:[['שמפו ד״ר פישר לשיער בלונדיני','']]}
 ];
 
+// Every editable field is a textarea so its text wraps instead of scrolling out of sight.
+// Browsers that have `field-sizing: content` keep the height right on their own, which also
+// survives a re-layout the script never sees, such as the one the print sheet does. Everywhere
+// else the height has to be set by hand, because a textarea never grows on its own.
+const nativeFieldSizing = typeof CSS !== 'undefined' && CSS.supports?.('field-sizing', 'content');
+// A height this script measured on screen can be a line short once the print sheet lays the
+// list out in narrower columns, so those browsers print one column wide instead.
+document.documentElement.classList.toggle('js-sized-fields', !nativeFieldSizing);
+function autoGrow(field) {
+  if (nativeFieldSizing || !field || !field.isConnected) return;
+  field.style.height = 'auto';
+  if (!field.scrollHeight) return;
+  field.style.height = `${field.scrollHeight + field.offsetHeight - field.clientHeight}px`;
+}
+function autoGrowAll(root = document) {
+  root.querySelectorAll('textarea').forEach(autoGrow);
+}
+// Item names stay single-line data; a pasted newline would only break the stored payload.
+function keepSingleLine(field) {
+  if (!field.value.includes('\n')) return;
+  const caret = field.selectionStart;
+  field.value = field.value.replace(/\r?\n/g, ' ');
+  field.setSelectionRange(caret, caret);
+}
+function bindField(field, onChange) {
+  field.addEventListener('input', () => { keepSingleLine(field); autoGrow(field); onChange(); });
+  field.addEventListener('keydown', event => {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    const note = field.classList.contains('name') ? field.closest('.row')?.querySelector('.note') : null;
+    if (note) note.focus(); else field.blur();
+  });
+}
+let growFrame = 0;
+window.addEventListener('resize', () => {
+  cancelAnimationFrame(growFrame);
+  growFrame = requestAnimationFrame(() => autoGrowAll());
+});
+
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const database = getDatabase(app);
@@ -117,13 +156,23 @@ function startList(id) {
   const shareButton = document.querySelector('#share-list');
   const localStorageKey = `shopping-list:${id}`;
   const rememberedName = readRecentLists().find(item => item.id === id)?.name;
+  const undoBar = document.querySelector('#undo-remove');
   let cloudReady = false;
   let saveTimer;
+  let undoTimer;
+  let pendingUndo = null;
   let lastSavedAt = null;
   let deleting = false;
 
   listNameInput.value = rememberedName || DEFAULT_LIST_NAME;
   shareButton.hidden = false;
+  document.querySelector('#undo-remove-action').addEventListener('click', () => {
+    const restoreRow = pendingUndo;
+    pendingUndo = null;
+    clearTimeout(undoTimer);
+    undoBar.hidden = true;
+    if (restoreRow) restoreRow();
+  });
 
   function setSync(message, error = false) {
     sync.textContent = message;
@@ -135,8 +184,10 @@ function startList(id) {
     rememberList(id, name);
   }
   function bindRow(element) {
-    element.querySelectorAll('input').forEach(input => input.addEventListener('input', save));
+    element.querySelectorAll('textarea').forEach(field => bindField(field, save));
     element.querySelector('[type=checkbox]').addEventListener('change', save);
+    element.querySelector('.remove-row').addEventListener('click', () => removeRow(element));
+    bindSwipe(element);
   }
   function row(item = {}, blank = false) {
     const element = template.content.firstElementChild.cloneNode(true);
@@ -146,6 +197,88 @@ function startList(id) {
     element.querySelector('.note').value = item.note || '';
     bindRow(element);
     return element;
+  }
+  function itemOf(element) {
+    return {
+      name: element.querySelector('.name').value,
+      note: element.querySelector('.note').value,
+      checked: element.querySelector('[type=checkbox]').checked,
+      blank: element.classList.contains('blank')
+    };
+  }
+  function offerUndo(restoreRow) {
+    pendingUndo = restoreRow;
+    undoBar.hidden = false;
+    clearTimeout(undoTimer);
+    undoTimer = setTimeout(() => { pendingUndo = null; undoBar.hidden = true; }, 7000);
+  }
+  function removeRow(element) {
+    const rows = element.parentElement;
+    const index = [...rows.children].indexOf(element);
+    const item = itemOf(element);
+    element.classList.add('removing');
+    setTimeout(() => { element.remove(); save(); }, 180);
+    offerUndo(() => {
+      if (!rows.isConnected) return;
+      const restored = row(item, item.blank);
+      rows.insertBefore(restored, rows.children[index] || null);
+      autoGrowAll(restored);
+      save();
+    });
+  }
+  // Swipe to delete, touch and pen only: dragging with a mouse belongs to the text itself.
+  // `touch-action: pan-y` on the row lets the page still scroll vertically under the finger.
+  function bindSwipe(element) {
+    const surface = element.querySelector('.row-surface');
+    let pointerId = null;
+    let startX = 0;
+    let startY = 0;
+    let moved = 0;
+    let decided = false;
+    let swiping = false;
+    const reset = () => {
+      element.classList.remove('swiping');
+      surface.style.transform = '';
+      pointerId = null;
+      moved = 0;
+      decided = false;
+      swiping = false;
+    };
+    surface.addEventListener('pointerdown', event => {
+      if (pointerId !== null || event.pointerType === 'mouse') return;
+      pointerId = event.pointerId;
+      startX = event.clientX;
+      startY = event.clientY;
+      moved = 0;
+      decided = false;
+      swiping = false;
+    });
+    surface.addEventListener('pointermove', event => {
+      if (event.pointerId !== pointerId) return;
+      const dx = event.clientX - startX;
+      const dy = event.clientY - startY;
+      if (!decided) {
+        if (Math.abs(dx) < 12 && Math.abs(dy) < 12) return;
+        decided = true;
+        swiping = Math.abs(dx) > Math.abs(dy);
+        if (!swiping) { pointerId = null; return; }
+        surface.setPointerCapture(pointerId);
+        element.classList.add('swiping');
+      }
+      moved = dx;
+      surface.style.transform = `translateX(${dx}px)`;
+    });
+    surface.addEventListener('pointerup', event => {
+      if (event.pointerId !== pointerId) return;
+      const distance = swiping ? Math.abs(moved) : 0;
+      if (surface.hasPointerCapture(pointerId)) surface.releasePointerCapture(pointerId);
+      reset();
+      if (distance >= Math.min(120, element.clientWidth * 0.32)) removeRow(element);
+    });
+    surface.addEventListener('pointercancel', event => {
+      if (event.pointerId !== pointerId) return;
+      reset();
+    });
   }
   function removeCategory(section) {
     if (confirm('להסיר את הקטגוריה ואת הפריטים שבה?')) {
@@ -158,16 +291,17 @@ function startList(id) {
     const section = document.createElement('article');
     const categoryTitle = data.title || 'קטגוריה חדשה';
     section.className = 'department';
-    section.innerHTML = '<div class="department-head"><input class="category-title" aria-label="שם קטגוריה"><input class="category-hint" aria-label="הערת קטגוריה" placeholder="מיקום בחנות"><button class="remove-category" type="button">הסרת קטגוריה</button></div><div class="rows"></div><button type="button" class="add">+ הוספת שורה</button>';
+    section.innerHTML = '<div class="department-head"><textarea class="category-title" rows="1" aria-label="שם קטגוריה"></textarea><textarea class="category-hint" rows="1" aria-label="הערת קטגוריה" placeholder="מיקום בחנות"></textarea><button class="remove-category" type="button">הסרת קטגוריה</button></div><div class="rows"></div><button type="button" class="add">+ הוספת שורה</button>';
     section.querySelector('.category-title').value = categoryTitle;
     section.querySelector('.category-hint').value = data.hint || '';
-    section.querySelectorAll('.category-title, .category-hint').forEach(input => input.addEventListener('input', save));
+    section.querySelectorAll('.category-title, .category-hint').forEach(field => bindField(field, save));
     const rows = section.querySelector('.rows');
     data.items.forEach(item => rows.append(row(item, Boolean(item.blank))));
     if (!data.items.length) rows.append(row({}, true));
     section.querySelector('.add').addEventListener('click', () => {
       const fresh = row({}, true);
       rows.append(fresh);
+      autoGrowAll(fresh);
       fresh.querySelector('.name').focus();
       save();
     });
@@ -186,6 +320,7 @@ function startList(id) {
     list.innerHTML = '';
     records.forEach(record => list.append(category(record)));
     renderEmptyState();
+    autoGrowAll(list);
   }
   function snapshotDepartments() {
     return [...list.querySelectorAll('.department')].map(section => ({
@@ -214,6 +349,7 @@ function startList(id) {
     const data = normalizePayload(payload);
     if (!data) return false;
     listNameInput.value = data.name;
+    autoGrow(listNameInput);
     renderDepartments(normalizeDepartmentRecords(data.departments, defaultDepartments));
     setListTitle(data.name);
     updateProgress();
@@ -296,13 +432,15 @@ function startList(id) {
   }
   setListTitle(listNameInput.value || DEFAULT_LIST_NAME);
   updateProgress();
+  autoGrowAll();
   connectCloud();
 
-  listNameInput.addEventListener('input', save);
+  bindField(listNameInput, save);
   document.querySelector('#add-category').addEventListener('click', () => {
     list.querySelector('.empty-list')?.remove();
     const section = category();
     list.append(section);
+    autoGrowAll(section);
     section.querySelector('.category-title').focus();
     save();
   });
