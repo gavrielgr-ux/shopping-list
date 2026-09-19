@@ -24,7 +24,15 @@ every open tab re-renders as soon as anything changes.
 
 Each list is addressed by the `?list=` parameter in its URL. Visiting the site with no
 parameter shows the landing view; the list of lists a device has opened is kept in that
-browser's `localStorage` only, which is why the database has no index of lists.
+browser's `localStorage` only, so it never leaves that device.
+
+Because of that, every list that gets saved is also advertised at `shared-lists/!index/{listId}`
+as `{name, updatedAt}`. That shared index is the only way something without a list's id can
+find it, and it is what `shopping_list_lists` reads. It sits inside `shared-lists` because the
+database rules grant access to a child of that node and nothing else; the `!` keeps the key
+outside the pattern a list id has to match, so no list can ever occupy it. Note that anyone who
+can read a list can also read the index, so list names and ids are discoverable rather than
+merely unguessable.
 
 ## Editing the list with an AI assistant
 

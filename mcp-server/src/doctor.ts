@@ -2,12 +2,14 @@
 /**
  * Connectivity self-test: `npm run doctor`.
  *
- * Checks the three things that can go wrong on a new machine — reaching Google's auth
- * endpoint, reaching the Realtime Database, and the database rules allowing a read of the
- * default list — and prints what to do about each failure. Writes nothing to the list.
+ * Checks what can go wrong on a new machine: reaching Google's auth endpoint, reaching the
+ * Realtime Database, the rules allowing a read of the default list, and whether the shared
+ * index that makes other lists discoverable can be read. Prints what to do about each failure.
+ * Writes nothing.
  */
 import { getAuthToken } from "./auth.js";
-import { DATABASE_URL, DEFAULT_LIST_ID, LISTS_ROOT, SITE_URL } from "./constants.js";
+import { DATABASE_URL, DEFAULT_LIST_ID, LIST_INDEX_PATH, LISTS_ROOT, SITE_URL } from "./constants.js";
+import { readListIndex } from "./list-index.js";
 import { progressOf } from "./normalize.js";
 import { shallowKeys } from "./rtdb.js";
 import { loadList } from "./store.js";
@@ -24,6 +26,7 @@ async function main(): Promise<void> {
   line("site", SITE_URL);
   line("database", DATABASE_URL);
   line("lists path", LISTS_ROOT);
+  line("index path", LIST_INDEX_PATH);
   line("default list", DEFAULT_LIST_ID);
   line("state file", stateFilePath);
   process.stdout.write("\n");
@@ -54,12 +57,22 @@ async function main(): Promise<void> {
     return;
   }
 
+  const indexed = await readListIndex();
+  line(
+    "3. shared list index",
+    indexed === null
+      ? "not readable: the database rules refuse it, so shopping_list_lists can only report lists this server has touched"
+      : indexed.length
+        ? `ok, ${indexed.length} list(s) advertised: ${indexed.map(entry => entry.name).join(", ")}`
+        : "readable but empty. It fills as the page or this server saves a list"
+  );
+
   const keys = await shallowKeys(LISTS_ROOT);
   line(
-    "3. enumerate lists",
+    "4. enumerate lists",
     keys === null
-      ? "not permitted by the database rules — shopping_list_lists falls back to the local registry (this is fine)"
-      : `ok — ${keys.length} list(s) visible`
+      ? "not permitted by the database rules, so the shared index above is what makes lists discoverable (this is fine)"
+      : `ok, ${keys.length} node(s) visible`
   );
 
   process.stdout.write("\nAll checks passed. The server can read and write the list.\n");

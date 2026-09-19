@@ -163,6 +163,21 @@ export async function writeNode(path: string, value: unknown, etag: string | nul
 }
 
 /**
+ * Remove a node and everything under it.
+ *
+ * Used to retract an index entry for a list that was deleted. Unconditional on purpose: each
+ * entry is owned by one list id, so there is no race worth a compare-and-swap, and a retraction
+ * that lost one would leave a dead list advertised.
+ */
+export async function deleteNode(path: string): Promise<void> {
+  const response = await authorized(token => ({
+    url: endpoint(path, { auth: token }),
+    init: { method: "DELETE" }
+  }));
+  await response.text().catch(() => "");
+}
+
+/**
  * List the child keys of a node without downloading their contents.
  *
  * Returns null when the database's own rules forbid the read, which is an expected outcome:

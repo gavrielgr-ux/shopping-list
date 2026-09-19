@@ -29,6 +29,24 @@ export const DATABASE_URL = (
 /** RTDB path prefix holding one child per list, matching `app.js`. */
 export const LISTS_ROOT = env("SHOPPING_LIST_ROOT") ?? "shared-lists";
 
+/**
+ * Path of the shared index that makes a list discoverable by something that lacks its id.
+ *
+ * The database stores one node per list and no index of them, and the page keeps its "recent
+ * lists" in the browser's `localStorage`, so a list created in a browser used to be invisible
+ * to anything that did not already know its id. Both the page and this server now write
+ * `{name, updatedAt}` here under the list's own id, and `shopping_list_lists` reads it.
+ *
+ * It sits inside `LISTS_ROOT` on purpose. The project's security rules grant read and write on
+ * a child of that root and nothing else: a sibling top-level node is refused outright, so an
+ * index there would need a rules change in the Firebase console before any of this worked.
+ *
+ * The `!` puts the key outside `LIST_ID_PATTERN`, so no list can ever be created at that id and
+ * the key can never be mistaken for one. That is also why enumeration filters by that pattern
+ * rather than by this name.
+ */
+export const LIST_INDEX_PATH = env("SHOPPING_LIST_INDEX_PATH") ?? `${LISTS_ROOT}/!index`;
+
 /** Public site used to build shareable links. */
 export const SITE_URL = (
   env("SHOPPING_LIST_SITE_URL") ?? "https://gavrielgr-ux.github.io/shopping-list/"

@@ -52,6 +52,14 @@ export interface RegistryEntry {
   lastSeen: string;
 }
 
+/** An entry in the shared index at `LIST_INDEX_PATH`, written by the page and by this server. */
+export interface IndexEntry {
+  id: string;
+  name: string;
+  /** Epoch milliseconds the entry was last advertised, or null when it was stored malformed. */
+  updatedAt: number | null;
+}
+
 /** Persisted state: the reused anonymous identity plus the known-list registry. */
 export interface PersistedState {
   refreshToken?: string;

@@ -1,6 +1,6 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.18.0/firebase-app.js';
 import { getAuth, signInAnonymously } from 'https://www.gstatic.com/firebasejs/12.18.0/firebase-auth.js';
-import { getDatabase, onValue, ref, set } from 'https://www.gstatic.com/firebasejs/12.18.0/firebase-database.js';
+import { getDatabase, onValue, ref, remove, set } from 'https://www.gstatic.com/firebasejs/12.18.0/firebase-database.js';
 import {
   DEFAULT_LIST_ID,
   DEFAULT_LIST_NAME,
@@ -90,6 +90,37 @@ function rememberList(id, name) {
 }
 function forgetList(id) {
   localStorage.setItem(recentStorageKey, JSON.stringify(removeListFromRecent(readRecentLists(), id)));
+}
+
+// The list above never leaves this browser, and the database holds one node per list and no
+// index of them, so a list created here could not be found by anything that did not already
+// have its id: an assistant asking "which lists are there?" saw only the default one. Every
+// list that gets saved is therefore also advertised under `shared-lists/!index/<id>`, which is
+// what the MCP server's shopping_list_lists reads. The key is '!index' because '!' is outside
+// the safeListId pattern, so no list can ever occupy it and `?list=!index` is not a valid URL.
+const indexEntry = id => ref(database, `shared-lists/!index/${id}`);
+// What this tab has already advertised, so typing in the name field does not write per keystroke.
+let advertised = null;
+function publishToIndex(id, name) {
+  const entry = `${id}\n${name}`;
+  if (entry === advertised) return;
+  advertised = entry;
+  // Best-effort, and unable to disturb the save it rides along with: advertising a list is not
+  // part of storing it, and `ref()` validates the key and would throw synchronously rather than
+  // reject if the SDK ever stopped accepting this one. Clearing the memo retries on the next save.
+  try {
+    set(indexEntry(id), { name, updatedAt: Date.now() }).catch(() => { advertised = null; });
+  } catch (_) {
+    advertised = null;
+  }
+}
+function unpublishFromIndex(id) {
+  advertised = null;
+  try {
+    return remove(indexEntry(id)).catch(() => { /* the list is gone for everyone either way */ });
+  } catch (_) {
+    return Promise.resolve();
+  }
 }
 function homeUrl() {
   const url = new URL(window.location.href);
@@ -366,6 +397,9 @@ function startList(id) {
     clearTimeout(saveTimer);
     setSync('שמירת שינויים…');
     const write = () => {
+      // Inside the debounced write, not outside it: renaming the list calls save() on every
+      // keystroke, and advertising each one would be a write per character.
+      publishToIndex(id, payload.name);
       set(cloudList, payload)
         .then(() => setSync('מסונכרן עכשיו'))
         .catch(() => setSync('הסנכרון אינו זמין כרגע — נשמר במכשיר', true));
@@ -394,6 +428,9 @@ function startList(id) {
         if (result.exists()) {
           const incoming = normalizePayload(result.val());
           if (incoming && shouldApplyRemoteUpdate(incoming, lastSavedAt)) restore(incoming);
+          // Opening a list is enough to advertise it, so a list last saved before the index
+          // existed becomes discoverable without anyone having to edit it.
+          if (incoming) publishToIndex(id, incoming.name);
           setSync('מסונכרן עם הרשימה המשותפת');
         } else {
           save(true);
@@ -415,6 +452,10 @@ function startList(id) {
     setSync('מחיקת הרשימה…');
     try {
       await set(cloudList, { deleted: true, deletedAt: Date.now() });
+      // Stop advertising it before leaving. This tab is the one that deleted it, so it is the
+      // one that retracts the entry; a tab that merely saw the tombstone leaves it alone rather
+      // than delaying its own navigation on a write somebody else already made.
+      await unpublishFromIndex(id);
       leaveDeletedList();
     } catch (_) {
       deleting = false;

@@ -19,7 +19,8 @@ The site is a static page backed by a Firebase Realtime Database, and these tool
 Working notes:
   - The list and its categories are in Hebrew and the page is right-to-left. Keep item names in Hebrew unless the user writes in another language, and put quantities in the item's "note" rather than in its name.
   - "Categories" are the aisle groupings the stored data calls "departments".
-  - Every tool defaults to list "${DEFAULT_LIST_ID}", the list the site opens by default, so a single-list conversation never needs an id. Other lists are addressed by the ?list= value in their URL.
+  - Every tool defaults to list "${DEFAULT_LIST_ID}", the list the site opens by default, so a single-list conversation never needs an id.
+  - shopping_list_lists finds the other lists, including ones created in a browser, from a shared index the page and this server both maintain. If it reports index_available as false, that index could not be read and a list the user names may be missing from the output: ask for the ?list= value from its URL and pass that as list_id.
   - Batch work into one call: shopping_add_items, shopping_set_checked and shopping_remove_items all take arrays.
   - Item and category names are matched loosely (case, Hebrew niqqud, prefix and substring), so "חלב" finds "חלב 3%". When a name matches several rows the tool says so and skips it instead of guessing.
   - Call shopping_get_list first when you need indices, or to check what is actually there before editing.

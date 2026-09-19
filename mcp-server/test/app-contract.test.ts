@@ -3,7 +3,9 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
+import { LIST_INDEX_PATH, LISTS_ROOT } from "../src/constants.js";
 import { serializePayload } from "../src/normalize.js";
+import { assertListId } from "../src/store.js";
 
 /**
  * The page's own model helpers, loaded from the repository root.
@@ -13,6 +15,7 @@ import { serializePayload } from "../src/normalize.js";
  * is resolved at runtime and its shape asserted, which also keeps it out of the build graph.
  */
 interface AppModel {
+  getListIdFromLocation: (locationHref: string) => string | null;
   normalizePayload: (
     value: unknown,
     fallbackName?: string
@@ -26,7 +29,7 @@ const modelPath = [
 ].find(existsSync);
 
 if (!modelPath) throw new Error("could not locate list-model.js at the repository root");
-const { normalizePayload, shouldApplyRemoteUpdate } = (await import(
+const { getListIdFromLocation, normalizePayload, shouldApplyRemoteUpdate } = (await import(
   pathToFileURL(modelPath).href
 )) as AppModel;
 
@@ -74,4 +77,20 @@ test("the page adopts an update only when updatedAt grows", () => {
   const written = serializePayload({ name: "x", departments: [], updatedAt: 5_000 }, 5_000);
   assert.ok(shouldApplyRemoteUpdate(written, 5_000));
   assert.equal(shouldApplyRemoteUpdate({ updatedAt: 5_000 }, 5_000), false);
+});
+
+test("the shared index key can never be opened or created as a list", () => {
+  // The index lives at a child of the lists root because the security rules grant read and
+  // write there and nowhere else. What keeps it from colliding with a real list is that its key
+  // is not a usable list id: the page refuses to open it and assertListId refuses to create it.
+  // If either side ever started accepting the key, a list could occupy the index path.
+  const key = LIST_INDEX_PATH.split("/").pop();
+  assert.equal(key, "!index");
+  assert.equal(
+    getListIdFromLocation(`https://example.test/?list=${encodeURIComponent(key!)}`),
+    null,
+    "the page must not open the index node as a list"
+  );
+  assert.throws(() => assertListId(key!), /not a usable list id/);
+  assert.ok(LIST_INDEX_PATH.startsWith(`${LISTS_ROOT}/`), "the index must sit where the rules allow writes");
 });

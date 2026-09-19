@@ -541,11 +541,27 @@ stringified indices and only returns a JSON array when the keys are contiguous f
 whose middle entry was removed arrives as `{"0":…,"2":…}`. Everything read is collapsed to a
 dense array in index order before use.
 
-**Enumerating lists is best-effort.** The database holds no index of lists, and the page keeps
-its "recent lists" only in `localStorage`. `shopping_list_lists` therefore merges three sources:
-a local registry of every list this server has touched, the default list, and — only if the
-security rules permit reading the `shared-lists` root — a direct enumeration. A list created in a
-browser and never edited here will not show up; address it by the `?list=` value in its URL.
+**A shared index is what makes lists discoverable.** The database holds no index of its own,
+its rules refuse a read of the `shared-lists` root, and the page keeps its "recent lists" in the
+browser's `localStorage`. A list created in a browser was therefore invisible here: the user had
+to paste its id before anything could be done with it. Both the page and this server now
+advertise every list they save at `shared-lists/!index/{listId}` as `{name, updatedAt}`, and
+`shopping_list_lists` merges that index with its own local registry, the default list, and a
+direct enumeration of the root when the rules happen to permit one. `index_available: false` in
+the output means the index could not be read, so the answer is only as complete as this server's
+own history and another list may still exist.
+
+The index is deliberately a child of `shared-lists`: the project's rules grant read and write
+there and refuse a sibling top-level node outright, so an index anywhere else would need a rules
+change in the Firebase console first. The `!` in the key puts it outside `LIST_ID_PATTERN`, so
+`assertListId` and the page's `safeListId` both refuse it and no list can occupy the path.
+`SHOPPING_LIST_INDEX_PATH` moves it if the rules are ever widened.
+
+Advertising happens on the write paths only. Doing it on reads too would make every reading tool
+a writer despite its `readOnlyHint`, and `shopping_list_lists` with `include_progress` would
+issue one write per list per call. Entries are retracted when a list is deleted, by whichever
+side deleted it, and a retraction missed that way is repaired the next time a delete is
+attempted on the tombstone.
 
 **Destructive tools require confirmation.** `shopping_delete_list`, `shopping_remove_category`
 on a non-empty category, and `shopping_clear_checked` with `mode: "remove"` all refuse unless

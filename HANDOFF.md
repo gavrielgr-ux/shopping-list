@@ -35,7 +35,10 @@ The site has no backend. `app.js` talks straight to a Firebase Realtime Database
 to its list with `onValue`. The MCP server reads and writes **the same** database node,
 `shared-lists/{listId}`, so a tool call shows up in any open browser tab within moments. It
 authenticates with anonymous Firebase sign-in, the same as the page does. Default list id is
-`rehovot-family-4d7f8c12`.
+`rehovot-family-4d7f8c12`. Both sides also advertise every list they save at
+`shared-lists/!index/{listId}`, which is how `shopping_list_lists` finds a list created in a
+browser: the database has no index of its own and its rules refuse a read of the
+`shared-lists` root.
 
 Database: `https://shopping-list-27ffd-default-rtdb.firebaseio.com`. The Firebase web API key in
 `mcp-server/src/constants.ts` is the same one published in the site's `app.js`; it identifies a
