@@ -17,6 +17,7 @@ import {
   createList,
   deleteList,
   ensureTrailingBlank,
+  ListDeleted,
   loadList,
   mutateList,
   newListId,
@@ -139,6 +140,10 @@ Examples:
         ...(discovered ?? []).filter(key => LIST_ID_PATTERN.test(key))
       ]);
 
+      // Ids the database answered for definitively: absent, or a tombstone. Not ids that merely
+      // could not be read, which may well be lists that exist.
+      const gone: string[] = [];
+
       const lists = await Promise.all(
         [...ids].map(async id => {
           const fallbackName = names.get(id) ?? DEFAULT_LIST_NAME;
@@ -153,7 +158,10 @@ Examples:
           }
           try {
             const loaded = await loadList(id);
-            if (loaded.missing) return { ...base, name: fallbackName, progress: null, reachable: false };
+            if (loaded.missing) {
+              gone.push(id);
+              return { ...base, name: fallbackName, progress: null, reachable: false };
+            }
             return {
               ...base,
               name: loaded.payload.name,
@@ -164,6 +172,7 @@ Examples:
             // A network block affects every list and is not something to report per row: let it
             // escape so the tool reports the real cause once.
             if (error instanceof NetworkBlocked) throw error;
+            if (error instanceof ListDeleted) gone.push(id);
             // A deleted or rule-blocked list is reported as unreachable rather than failing the call.
             return { ...base, name: fallbackName, progress: null, reachable: false };
           }
@@ -174,6 +183,14 @@ Examples:
         if (left.is_default !== right.is_default) return left.is_default ? -1 : 1;
         return left.name.localeCompare(right.name, "he");
       });
+
+      // Drop local bookkeeping for a list the database says is not there. Without this the
+      // registry never forgets anything: an id that entered it once is reported as unreachable
+      // for ever, and only an explicit delete through this server ever removed one. Local state
+      // only, which the reading tools already write when they record a list they have read; the
+      // shared index is left to the delete paths, which are writers.
+      const known = new Set(registry.map(entry => entry.id));
+      await Promise.all(gone.filter(id => known.has(id)).map(id => forgetList(id)));
 
       const output = {
         count: lists.length,

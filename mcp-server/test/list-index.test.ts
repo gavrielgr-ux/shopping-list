@@ -277,3 +277,140 @@ test("a malformed index entry is tolerated rather than crashing the listing", as
     await harness.close();
   }
 });
+
+test("a registry entry for a list the database says is gone is forgotten", async () => {
+  // Nothing else ever removed one: only an explicit delete through this server called
+  // forgetList, so an id that entered the registry was reported as unreachable for ever. A test
+  // run that wrote the real state file is exactly how that came up.
+  const listId = "list-vanishes-later";
+  const harness = await startHarness({
+    data: { [LIST_PATH]: seedList(), [`shared-lists/${listId}`]: seedList({ name: "רשימה" }) },
+    blockEnumeration: true
+  });
+  try {
+    await harness.text("shopping_get_list", { list_id: listId });
+    harness.rtdb.store.delete(`shared-lists/${listId}`);
+
+    const first = await harness.data<{ lists: { id: string; reachable: boolean | null }[] }>(
+      "shopping_list_lists",
+      { response_format: "json" }
+    );
+    assert.equal(
+      first.lists.find(item => item.id === listId)?.reachable,
+      false,
+      "the call that notices it is gone still reports it, so the answer explains itself"
+    );
+
+    const second = await harness.data<{ lists: { id: string }[] }>("shopping_list_lists", {
+      response_format: "json"
+    });
+    assert.ok(!second.lists.some(item => item.id === listId), "and it is not carried for ever");
+  } finally {
+    await harness.close();
+  }
+});
+
+test("a list that merely could not be read is kept, because it may well exist", async () => {
+  // The distinction the pruning turns on. Forgetting a list because the rules blocked one read
+  // would lose the only record of it this server has.
+  const listId = "list-unreadable-for-now";
+  const options = {
+    data: { [LIST_PATH]: seedList(), [`shared-lists/${listId}`]: seedList({ name: "רשימה חסויה" }) },
+    blockEnumeration: true,
+    denyPath: undefined as string | undefined
+  };
+  const harness = await startHarness(options);
+  try {
+    await harness.text("shopping_get_list", { list_id: listId });
+
+    options.denyPath = `shared-lists/${listId}`;
+    const blocked = await harness.data<{ lists: { id: string; reachable: boolean | null }[] }>(
+      "shopping_list_lists",
+      { response_format: "json" }
+    );
+    assert.equal(blocked.lists.find(item => item.id === listId)?.reachable, false);
+
+    options.denyPath = undefined;
+    const after = await harness.data<{ lists: { id: string; reachable: boolean | null }[] }>(
+      "shopping_list_lists",
+      { response_format: "json" }
+    );
+    assert.equal(
+      after.lists.find(item => item.id === listId)?.reachable,
+      true,
+      "it must still be known once it can be read again"
+    );
+  } finally {
+    await harness.close();
+  }
+});
+
+test("a list tombstoned by somebody else is forgotten locally", async () => {
+  const listId = "list-tombstoned";
+  const harness = await startHarness({
+    data: { [LIST_PATH]: seedList(), [`shared-lists/${listId}`]: seedList({ name: "רשימה" }) },
+    blockEnumeration: true
+  });
+  try {
+    await harness.text("shopping_get_list", { list_id: listId });
+    // A tombstone written by another client, so this server never called forgetList itself.
+    harness.rtdb.set(`shared-lists/${listId}`, { deleted: true, deletedAt: 1_700_000_500_000 });
+
+    await harness.text("shopping_list_lists");
+    const after = await harness.data<{ lists: { id: string }[] }>("shopping_list_lists", {
+      include_progress: false,
+      response_format: "json"
+    });
+    assert.ok(!after.lists.some(item => item.id === listId), "a tombstone counts as gone");
+  } finally {
+    await harness.close();
+  }
+});
+
+test("a stale index entry keeps a dead list listed until a delete retracts it", async () => {
+  // The boundary of the pruning above. Forgetting it locally is not enough while the shared
+  // index still advertises it, and the reading tools deliberately do not write the index: that
+  // belongs to the delete paths, which are writers. Reported as unreachable in the meantime.
+  const listId = "list-dead-but-advertised";
+  const harness = await startHarness({
+    data: {
+      [LIST_PATH]: seedList(),
+      [`shared-lists/${listId}`]: { deleted: true, deletedAt: 1_700_000_500_000 },
+      [entryPath(listId)]: { name: "רשימה שנמחקה", updatedAt: 1_700_000_100_000 }
+    },
+    blockEnumeration: true
+  });
+  try {
+    const listed = await harness.data<{ lists: { id: string; reachable: boolean | null }[] }>(
+      "shopping_list_lists",
+      { response_format: "json" }
+    );
+    assert.equal(listed.lists.find(item => item.id === listId)?.reachable, false);
+
+    // The delete path is what retracts it, and then it is gone from the output.
+    await harness.error("shopping_delete_list", { list_id: listId, confirm: true });
+    assert.equal(harness.rtdb.get(entryPath(listId)), null);
+    const after = await harness.data<{ lists: { id: string }[] }>("shopping_list_lists", {
+      include_progress: false,
+      response_format: "json"
+    });
+    assert.ok(!after.lists.some(item => item.id === listId));
+  } finally {
+    await harness.close();
+  }
+});
+
+test("an index entry for a list that is simply absent is retracted on a delete attempt", async () => {
+  const listId = "list-advertised-but-absent";
+  const harness = await startHarness({
+    data: { [LIST_PATH]: seedList(), [entryPath(listId)]: { name: "רשימת רפאים", updatedAt: 1 } },
+    blockEnumeration: true
+  });
+  try {
+    const message = await harness.error("shopping_delete_list", { list_id: listId, confirm: true });
+    assert.match(message, /nothing to delete/);
+    assert.equal(harness.rtdb.get(entryPath(listId)), null, "stop advertising a list that is not there");
+  } finally {
+    await harness.close();
+  }
+});
