@@ -19,6 +19,20 @@ export class ToolError extends Error {
   }
 }
 
+/**
+ * Raised when a list is gone for good: a tombstone, not merely unreadable.
+ *
+ * Callers that prune stale bookkeeping need to tell "the database says this is not there" from
+ * "this could not be read", because the second may still be a list that exists. The message is
+ * unchanged, so this is only a narrowing of what was already thrown.
+ */
+export class ListDeleted extends ToolError {
+  constructor(message: string) {
+    super(message);
+    this.name = "ListDeleted";
+  }
+}
+
 /** Validate a list id against the pattern the web app uses to accept `?list=`. */
 export function assertListId(id: string): string {
   const trimmed = id.trim();
@@ -51,7 +65,7 @@ export async function loadList(id: string): Promise<LoadedList> {
   const listId = assertListId(id);
   const { value, etag } = await readNode<unknown>(pathFor(listId));
   if (isDeleted(value)) {
-    throw new ToolError(
+    throw new ListDeleted(
       `List "${listId}" was deleted, so it can no longer be read or edited. Create a new list with shopping_create_list.`
     );
   }
@@ -176,6 +190,9 @@ export async function deleteList(id: string): Promise<void> {
   const listId = assertListId(id);
   const existing = await readNode<unknown>(pathFor(listId));
   if (existing.value === null) {
+    // An index entry for a list that is not there is stale advertising too, and no delete ever
+    // retracted it. Same repair as the tombstone case below.
+    await unpublishList(listId);
     throw new ToolError(`No list exists at id "${listId}", so there is nothing to delete.`);
   }
   if (isDeleted(existing.value)) {
