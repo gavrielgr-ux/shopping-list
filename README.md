@@ -79,5 +79,12 @@ the same token. That covers the things that cannot speak MCP: an iOS Shortcut tr
 no AI subscription and no organisation permission, which makes it the simplest thing to share
 with family.
 
+### From Telegram
+
+A private Telegram bot in the same Worker lets family members manage the list by chatting in
+Hebrew ("תוסיף חלב וביצים", "מה חסר?"), using Gemini's free tier. Only numbers or Telegram ids on
+an allowlist get in, and anything that deletes waits for a button press. Setup is six steps, all
+from a phone; see "The family Telegram bot" in [`mcp-server/README.md`](mcp-server/README.md).
+
 For the tool reference, the HTTP API, the design notes and how to use it from Claude Desktop or
 a local checkout, see [`mcp-server/README.md`](mcp-server/README.md).
