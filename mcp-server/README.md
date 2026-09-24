@@ -468,6 +468,143 @@ The instructions carry their weight: without the batching rule a model adds item
 time, and without the ambiguity rule it silently picks a row when a name matches several, which
 is exactly what the API refuses to do for it.
 
+## The family Telegram bot
+
+Family members can manage the list by chatting, in Hebrew, with a private Telegram bot: "תוסיף
+חלב, ביצים ולחם", "מה חסר?", "קניתי את הלחם", "תנקה את מה שקנינו". The change shows up in any
+open tab of the site within moments, like every other write.
+
+It runs inside this same Worker, on the free tiers of Cloudflare and Gemini, with no new service:
+
+```
+Telegram ──POST /telegram/webhook──▶ worker.ts ──▶ src/telegram/bot.ts     access, commands, buttons
+                                                          │
+                                                          ▼
+                                                   src/telegram/agent.ts    Gemini tool loop
+                                                          │
+                                         MCP Client ─InMemoryTransport─▶ createServer()  (the tools)
+```
+
+The model gets the MCP server's own tools, generated from `listTools()` at build time, never a
+hand-written copy. Deleting a whole list is left out.
+
+### Setup, all from a phone
+
+1. **Create the bot.** In Telegram, open `@BotFather`, send `/newbot`, and copy the token it
+   gives you. The command menu is set up for you in step 5, so `/setcommands` is not needed.
+2. **Get a Gemini key** at <https://aistudio.google.com/apikey>. A Google account is enough; no
+   credit card.
+3. **Check the new build is live.** Once this code is on `main`, open
+   `https://shopping-list-mcp.gavrielgr.workers.dev/telegram/webhook` in the browser. "Method Not
+   Allowed" means the bot code is deployed. A JSON "unauthorized" answer means an older build is
+   still live: wait for Workers Builds to finish.
+4. **Add the settings.** Cloudflare dashboard → Workers & Pages → `shopping-list-mcp` → Settings →
+   Variables and Secrets → Add. Choose type **Secret** for every one of these, then deploy:
+
+   | Name | Value |
+   | --- | --- |
+   | `TELEGRAM_BOT_TOKEN` | The token from step 1 |
+   | `GEMINI_API_KEY` | The key from step 2 |
+   | `TELEGRAM_WEBHOOK_SECRET` | A long random string of **letters, digits, `_` and `-` only**. Telegram rejects anything else, so set a password generator to letters and digits, 40 or more characters |
+   | `BOT_ALLOWED_PHONES` | The family's numbers, comma separated. Any format works: `052-1234567, 054-7654321` |
+   | `BOT_ALLOWED_USER_IDS` | Optional. Telegram numeric ids, comma separated, for anyone who prefers not to share a number |
+   | `BOT_MODEL` | Optional. Gemini models to try in order. Default `gemini-3.8-flash,gemini-3.5-flash,gemini-3.5-flash-lite` |
+
+   Secrets, rather than plain variables, because they survive every deploy from `wrangler.toml`.
+   (`keep_vars = true` there protects plain variables too, as a second line of defence.)
+5. **Register the webhook.** Open
+   `https://shopping-list-mcp.gavrielgr.workers.dev/<ACCESS_TOKEN>/telegram/setup` once, with the
+   Worker's existing access token in place of `<ACCESS_TOKEN>`. It calls Telegram's `setWebhook`
+   with the secret and sets the Hebrew command menu. The answer should say `"ok": true`.
+6. **Message the bot.** Send `/start`, press "📱 שיתוף מספר הטלפון", and start writing.
+
+### When the bot does nothing
+
+Open `https://shopping-list-mcp.gavrielgr.workers.dev/<ACCESS_TOKEN>/telegram/status`. It shows
+Telegram's view of the webhook (`last_error_message`, `pending_update_count`), which settings
+are missing, how many allowed phones and ids are set, and whether D1 storage is in use. The bot
+token never appears in it.
+
+The Worker's logs (Observability in the dashboard) show one line when an isolate first answers,
+such as `telegram bot answering with gemini (gemini-3.8-flash,…), storage d1`, and one line per
+refused user, `telegram bot: refused user 123456789`. Copy that id into `BOT_ALLOWED_USER_IDS` to
+let the person in without a phone number.
+
+### Who gets in
+
+- Private chats only. Groups are ignored.
+- A user id on `BOT_ALLOWED_USER_IDS` is let in straight away.
+- Anyone else gets a "share my phone number" button, and nothing else, until they share a number
+  on `BOT_ALLOWED_PHONES`. The contact must be their own (`contact.user_id` equal to the sender),
+  so a forwarded contact card does not work. `05x` numbers are read as Israeli.
+- The check runs against the current allowlist every time, so removing a number revokes access.
+
+### Deleting needs a button press
+
+The tools already refuse destructive operations (clearing bought items with `mode='remove'`,
+removing a category that still has items) unless called with `confirm=true`. But a model sets
+that flag itself, and item names are text anyone with the list link can type, so the flag alone
+would be an honour system.
+
+So the bot never runs such a call directly. It holds it and shows "✅ כן, לבצע / ❌ ביטול" buttons,
+and runs the stored call only when a family member presses the button, once, within 10 minutes.
+
+### Commands
+
+| Command | What it does |
+| --- | --- |
+| `/start` | How to use it |
+| `/list` | What is left to buy. Read straight from the tool with no model call, so it is instant and uses no quota |
+| `/reset` | Start a new conversation |
+| `/forget` | Delete the chat history and the phone verification |
+
+### Storage
+
+History (plain text of the last 10 exchanges, never tool calls), verified users, seen update ids
+and pending confirmations live in a D1 database called `shopping-list-bot`. `wrangler.toml`
+declares it without an id, so the first deploy creates it and later deploys reuse it.
+
+If the status page says `memory`, the deploy was not allowed to create the database. The bot
+still works, but phone-verified users are asked to share their number again whenever Cloudflare
+starts a new isolate. To fix it, create a D1 database named `shopping-list-bot` in the dashboard
+(Storage & Databases → D1) and bind it to the Worker as `DB` under Settings → Bindings.
+
+None of this is stored in the Firebase database, because anyone who can read a list can read
+everything under `shared-lists`.
+
+### Limits and privacy
+
+- **Free-tier Gemini may use prompts to improve Google's products.** Shopping lists are low-risk,
+  but the family should know. `/start` says so.
+- When a model is busy (503) or rate-limited (429), the next one in `BOT_MODEL` is tried. Once a
+  model has answered, the rest of that message stays on it, because Gemini's thought signatures
+  only work with the model that made them. When no model can answer, the bot says so in Hebrew
+  and asks to try again in a minute.
+- At most 8 model calls per message, 20 seconds per call and 25 seconds per message, inside the
+  30 seconds Cloudflare allows after the webhook has been answered.
+
+### CPU time
+
+The free plan allows about 10 ms of CPU per request; time spent waiting on the network does not
+count. Measured locally in Node, with the network faked, a three-step turn (read the list, add
+an item, reply):
+
+| | CPU |
+| --- | --- |
+| Warm, median of 20 | 2.7 ms |
+| Warm, worst of 20 | 5.0 ms |
+| First turn in a fresh process | 137 ms |
+
+The first-turn figure is mostly one-off JIT and schema compilation. It is in line with the
+existing `/api/list` route's first request (151 ms measured the same way), which already works
+in production. Generating the tool declarations at build time matters here: a single
+`listTools()` costs about 30 ms, on every call.
+
+**Not yet measured on Cloudflare.** After the first real conversations, read Observability → CPU
+time for the Worker and record it here. If requests fail with error 1102 (CPU exceeded), the
+options, in order, are: trim the tools offered to the model, Workers Paid ($5 a month), or run
+the bot elsewhere against `/api/`.
+
 ## Tools
 
 Every tool is prefixed `shopping_`, takes an optional `list_id` (defaulting to
@@ -605,7 +742,7 @@ The state file holds a refresh token for the server's own anonymous identity, an
 ## Tests
 
 ```bash
-npm test        # 73 tests
+npm test        # 185 tests
 ```
 
 The tests run the real server over an in-memory MCP transport against a fake Realtime Database
@@ -626,7 +763,21 @@ categories back over it. The page now tolerates it, and this test fails if that 
 default, a missing, wrong and prefix-of-correct token, both places a valid token may travel, and
 an authenticated request to an unknown path.
 
+`test/telegram.test.ts` covers the bot end to end: Telegram as a fake `fetch` that records
+calls, Gemini as a scripted model, and the real tools against the fake database, so "add these"
+really changes a list. It checks the 403/404/405 answers, that a stranger gets the phone button
+and never reaches the model, that a forwarded contact is refused, `/list` without a model call,
+parallel tool calls, the thought signature coming back unchanged, model fallback and staying on
+the model that answered, a missing tool-call id, unreadable arguments, the step cap, update
+de-duplication, the HTML fallback and message splitting, the confirmation button, and the D1
+store's real SQL on Node's built-in SQLite. `test/telegram-units.test.ts` covers the schema
+cleaner, including a parameter named `title` surviving.
+
 Nothing in the suite touches the network or the real list.
 
 The Worker was additionally verified by running it under `wrangler dev` in `workerd`, Cloudflare's
 own runtime, completing an MCP handshake over HTTP and calling a tool that read the live database.
+The Telegram bot was run the same way, with a local D1: the webhook answered 405, 403 and 200 as
+designed, a re-delivered update was handled once, the in-process tools read the live list, and
+the Bot API calls reached Telegram. That run caught a bug the Node tests could not: `workerd`
+rejects `fetch` called as a method of another object.

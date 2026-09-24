@@ -16,12 +16,20 @@
  *
  * Two interfaces are served, both behind the same token: `/mcp` for MCP clients, and `/api/*`
  * for everything that cannot speak MCP, such as a ChatGPT custom action or an iOS Shortcut.
+ *
+ * The family's Telegram bot lives here too. Its webhook is the one route outside the token,
+ * because Telegram cannot send it; Telegram's own secret header guards it instead, and the bot
+ * serves nothing until that secret is configured. See `src/telegram/bot.ts`.
  */
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { handleRest } from "./rest.js";
+import { secretsMatch } from "./secrets.js";
 import { createServer } from "./server.js";
+import { handleTelegramAdmin, handleTelegramWebhook } from "./telegram/bot.js";
+import type { BotEnv } from "./telegram/config.js";
+import type { ExecutionContext } from "./telegram/platform.js";
 
-export interface WorkerEnv {
+export interface WorkerEnv extends BotEnv {
   /** Shared secret required on every request. Set with `wrangler secret put`. */
   SHOPPING_LIST_ACCESS_TOKEN?: string;
   /** Optional Firebase credential, so the Worker need not create anonymous users. */
@@ -33,16 +41,6 @@ const json = (status: number, body: unknown): Response =>
     status,
     headers: { "Content-Type": "application/json" }
   });
-
-/** Compare two secrets by digest, so the comparison does not short-circuit on the first byte. */
-async function secretsMatch(left: string, right: string): Promise<boolean> {
-  const digest = async (value: string): Promise<string> => {
-    const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
-    return [...new Uint8Array(bytes)].map(byte => byte.toString(16).padStart(2, "0")).join("");
-  };
-  const [a, b] = await Promise.all([digest(left), digest(right)]);
-  return a === b;
-}
 
 /**
  * Pull the caller's token from wherever it was put.
@@ -64,14 +62,25 @@ function presentedToken(request: Request, url: URL): { token: string | null; res
 }
 
 export default {
-  async fetch(request: Request, env: WorkerEnv): Promise<Response> {
+  async fetch(request: Request, env: WorkerEnv, ctx?: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
+
+    // Env bindings are not visible to module-scope code, so hand the credential over before the
+    // first database call. Everything else has a working default baked in.
+    if (env.SHOPPING_LIST_DB_SECRET && !process.env.SHOPPING_LIST_DB_SECRET) {
+      process.env.SHOPPING_LIST_DB_SECRET = env.SHOPPING_LIST_DB_SECRET;
+    }
 
     // Unauthenticated liveness check, deliberately saying nothing about configuration.
     if (url.pathname === "/" || url.pathname === "/health") {
       return new Response("shopping-list-mcp-server\n", {
         headers: { "Content-Type": "text/plain; charset=utf-8" }
       });
+    }
+
+    // Before the token check: Telegram authenticates with its secret header instead.
+    if (url.pathname === "/telegram/webhook") {
+      return handleTelegramWebhook(request, env, ctx);
     }
 
     const expected = env.SHOPPING_LIST_ACCESS_TOKEN?.trim();
@@ -101,11 +110,9 @@ export default {
       );
     }
 
-    // Env bindings are not visible to module-scope code, so hand the credential over before the
-    // first database call. Everything else has a working default baked in.
-    if (env.SHOPPING_LIST_DB_SECRET && !process.env.SHOPPING_LIST_DB_SECRET) {
-      process.env.SHOPPING_LIST_DB_SECRET = env.SHOPPING_LIST_DB_SECRET;
-    }
+    // Owner routes for the Telegram bot: webhook registration and status.
+    const telegramResponse = await handleTelegramAdmin(request, rest, url, env);
+    if (telegramResponse) return telegramResponse;
 
     // Plain HTTP interface, for callers that cannot speak MCP.
     const restResponse = await handleRest(request, rest, url);

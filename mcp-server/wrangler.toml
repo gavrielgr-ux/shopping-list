@@ -16,6 +16,19 @@ compatibility_flags = ["nodejs_compat"]
 # No Durable Objects, no KV and no queues: the transport runs stateless, which keeps this
 # deployment inside the free tier.
 
+# Keep variables added in the dashboard. Without this, every deploy from this file (including
+# each Workers Builds deploy on push) deletes dashboard variables that are not listed here, which
+# would silently empty the Telegram bot's allowlists. Secrets survive a deploy either way.
+keep_vars = true
+
+# The Telegram bot's memory: chat history, verified users, seen updates, pending confirmations.
+# No database_id on purpose: wrangler creates a D1 database with this name on the first deploy
+# and reuses it afterwards. If the deploy token may not create databases, wrangler skips it with
+# a warning and the bot falls back to memory, which /<token>/telegram/status reports.
+[[d1_databases]]
+binding = "DB"
+database_name = "shopping-list-bot"
+
 # Run before every deploy, so a build from the dashboard needs no extra configuration and a
 # deploy can never ship a stale dist/ (which is not committed).
 [build]
